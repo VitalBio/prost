@@ -1,7 +1,10 @@
 //! Protobuf encoding and decoding errors.
 
+#[cfg(feature = "alloc")]
 use alloc::borrow::Cow;
+#[cfg(feature = "alloc")]
 use alloc::boxed::Box;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use core::fmt;
@@ -13,6 +16,7 @@ use core::fmt;
 /// general it is not possible to exactly pinpoint why data is malformed.
 #[derive(Clone, PartialEq, Eq)]
 pub struct DecodeError {
+    #[cfg(feature = "alloc")]
     inner: Box<Inner>,
 }
 
@@ -31,8 +35,12 @@ impl DecodeError {
     ///
     /// Meant to be used only by `Message` implementations.
     #[cold]
-    pub(crate) fn new(description: impl Into<Cow<'static, str>>) -> DecodeError {
+    pub(crate) fn new(
+        #[cfg(feature = "alloc")]
+        description: impl Into<Cow<'static, str>>
+    ) -> DecodeError {
         DecodeError {
+            #[cfg(feature = "alloc")]
             inner: Box::new(Inner {
                 description: description.into(),
                 stack: Vec::new(),
@@ -44,6 +52,7 @@ impl DecodeError {
     ///
     /// Meant to be used only by `Message` implementations.
     #[doc(hidden)]
+    #[cfg(feature = "alloc")]
     pub fn push(&mut self, message: &'static str, field: &'static str) {
         self.inner.stack.push((message, field));
     }
@@ -59,6 +68,11 @@ impl fmt::Debug for DecodeError {
 }
 
 impl fmt::Display for DecodeError {
+    #[cfg(not(feature = "alloc"))]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("failed to decode Protobuf message")
+    }
+    #[cfg(feature = "alloc")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("failed to decode Protobuf message: ")?;
         for &(message, field) in &self.inner.stack {

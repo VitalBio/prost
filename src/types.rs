@@ -5,7 +5,9 @@
 //! the `prost-types` crate in order to avoid a cyclic dependency between `prost` and
 //! `prost-build`.
 
+#[cfg(feature = "alloc")]
 use alloc::string::String;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use ::bytes::{Buf, BufMut, Bytes};

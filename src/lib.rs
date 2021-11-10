@@ -73,9 +73,12 @@ where
 {
     let length = decode_varint(&mut buf)?;
     if length > usize::max_value() as u64 {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new(
             "length delimiter exceeds maximum usize value",
         ));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
     Ok(length as usize)
 }

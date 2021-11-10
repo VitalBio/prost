@@ -4,9 +4,13 @@
 
 #![allow(clippy::implicit_hasher, clippy::ptr_arg)]
 
+#[cfg(feature = "alloc")]
 use alloc::collections::BTreeMap;
+#[cfg(feature = "alloc")]
 use alloc::format;
+#[cfg(feature = "alloc")]
 use alloc::string::String;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::cmp::min;
 use core::convert::TryFrom;
@@ -168,7 +172,10 @@ unsafe fn decode_varint_slice(bytes: &[u8]) -> Result<(u64, usize), DecodeError>
     };
 
     // We have overrun the maximum size of a varint (10 bytes). Assume the data is corrupt.
-    Err(DecodeError::new("invalid varint"))
+    #[cfg(feature = "alloc")]
+    return Err(DecodeError::new("invalid varint"));
+    #[cfg(not(feature = "alloc"))]
+    return Err(DecodeError::new());
 }
 
 /// Decodes a LEB128-encoded variable length integer from the buffer, advancing the buffer as
@@ -187,7 +194,10 @@ where
         }
     }
 
-    Err(DecodeError::new("invalid varint"))
+    #[cfg(feature = "alloc")]
+    return Err(DecodeError::new("invalid varint"));
+    #[cfg(not(feature = "alloc"))]
+    return Err(DecodeError::new());
 }
 
 /// Additional information passed to every decode/merge function.
@@ -251,7 +261,10 @@ impl DecodeContext {
     #[inline]
     pub(crate) fn limit_reached(&self) -> Result<(), DecodeError> {
         if self.recurse_count == 0 {
-            Err(DecodeError::new("recursion limit reached"))
+            #[cfg(feature = "alloc")]
+            return Err(DecodeError::new("recursion limit reached"));
+            #[cfg(not(feature = "alloc"))]
+            return Err(DecodeError::new());
         } else {
             Ok(())
         }
@@ -299,10 +312,15 @@ impl TryFrom<u64> for WireType {
             3 => Ok(WireType::StartGroup),
             4 => Ok(WireType::EndGroup),
             5 => Ok(WireType::ThirtyTwoBit),
-            _ => Err(DecodeError::new(format!(
-                "invalid wire type value: {}",
-                value
-            ))),
+            _ => {
+                #[cfg(feature = "alloc")]
+                return Err(DecodeError::new(format!(
+                            "invalid wire type value: {}",
+                            value
+                )));
+                #[cfg(not(feature = "alloc"))]
+                return Err(DecodeError::new());
+            },
         }
     }
 }
@@ -328,13 +346,19 @@ where
 {
     let key = decode_varint(buf)?;
     if key > u64::from(u32::MAX) {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new(format!("invalid key value: {}", key)));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
     let wire_type = WireType::try_from(key & 0x07)?;
     let tag = key as u32 >> 3;
 
     if tag < MIN_TAG {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new("invalid tag value: 0"));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
 
     Ok((tag, wire_type))
@@ -352,10 +376,13 @@ pub fn key_len(tag: u32) -> usize {
 #[inline]
 pub fn check_wire_type(expected: WireType, actual: WireType) -> Result<(), DecodeError> {
     if expected != actual {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new(format!(
             "invalid wire type: {:?} (expected {:?})",
             actual, expected
         )));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
     Ok(())
 }
@@ -375,7 +402,10 @@ where
     let len = decode_varint(buf)?;
     let remaining = buf.remaining();
     if len > remaining as u64 {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new("buffer underflow"));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
 
     let limit = remaining - len as usize;
@@ -384,7 +414,10 @@ where
     }
 
     if buf.remaining() != limit {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new("delimited length exceeded"));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
     Ok(())
 }
@@ -409,18 +442,29 @@ where
             match inner_wire_type {
                 WireType::EndGroup => {
                     if inner_tag != tag {
+                        #[cfg(feature = "alloc")]
                         return Err(DecodeError::new("unexpected end group tag"));
+                        #[cfg(not(feature = "alloc"))]
+                        return Err(DecodeError::new());
                     }
                     break 0;
                 }
                 _ => skip_field(inner_wire_type, inner_tag, buf, ctx.enter_recursion())?,
             }
         },
-        WireType::EndGroup => return Err(DecodeError::new("unexpected end group tag")),
+        WireType::EndGroup => {
+            #[cfg(feature = "alloc")]
+            return Err(DecodeError::new("unexpected end group tag"));
+            #[cfg(not(feature = "alloc"))]
+            return Err(DecodeError::new());
+        },
     };
 
     if len > buf.remaining() as u64 {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new("buffer underflow"));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
 
     buf.advance(len as usize);
@@ -637,7 +681,10 @@ macro_rules! fixed_width {
             {
                 check_wire_type($wire_type, wire_type)?;
                 if buf.remaining() < $width {
+                    #[cfg(feature = "alloc")]
                     return Err(DecodeError::new("buffer underflow"));
+                    #[cfg(not(feature = "alloc"))]
+                    return Err(DecodeError::new());
                 }
                 *value = buf.$get();
                 Ok(())
@@ -800,6 +847,7 @@ macro_rules! length_delimited {
     };
 }
 
+#[cfg(feature = "alloc")]
 pub mod string {
     use super::*;
 
@@ -850,9 +898,14 @@ pub mod string {
                     mem::forget(drop_guard);
                     Ok(())
                 }
-                Err(_) => Err(DecodeError::new(
-                    "invalid string value: data is not UTF-8 encoded",
-                )),
+                Err(_) => {
+                    #[cfg(feature = "alloc")]
+                    return Err(DecodeError::new(
+                        "invalid string value: data is not UTF-8 encoded",
+                    ));
+                    #[cfg(not(feature = "alloc"))]
+                    return Err(DecodeError::new());
+                },
             }
         }
     }
@@ -978,7 +1031,10 @@ pub mod bytes {
         check_wire_type(WireType::LengthDelimited, wire_type)?;
         let len = decode_varint(buf)?;
         if len > buf.remaining() as u64 {
+            #[cfg(feature = "alloc")]
             return Err(DecodeError::new("buffer underflow"));
+            #[cfg(not(feature = "alloc"))]
+            return Err(DecodeError::new());
         }
         let len = len as usize;
 
@@ -1157,7 +1213,10 @@ pub mod group {
             let (field_tag, field_wire_type) = decode_key(buf)?;
             if field_wire_type == WireType::EndGroup {
                 if field_tag != tag {
+                    #[cfg(feature = "alloc")]
                     return Err(DecodeError::new("unexpected end group tag"));
+                    #[cfg(not(feature = "alloc"))]
+                    return Err(DecodeError::new());
                 }
                 return Ok(());
             }
@@ -1404,6 +1463,7 @@ pub mod hash_map {
     map!(HashMap);
 }
 
+#[cfg(feature = "alloc")]
 pub mod btree_map {
     map!(BTreeMap);
 }

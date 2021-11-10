@@ -1,3 +1,4 @@
+#[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 use core::fmt::Debug;
 use core::usize;
@@ -136,6 +137,7 @@ pub trait Message: Debug + Send + Sync {
     fn clear(&mut self);
 }
 
+#[cfg(feature = "alloc")]
 impl<M> Message for Box<M>
 where
     M: Message,
