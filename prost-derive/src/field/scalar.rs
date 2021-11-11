@@ -1,10 +1,17 @@
+#[cfg(feature = "alloc")]
 use std::convert::TryFrom;
 use std::fmt;
 
-use anyhow::{anyhow, bail, Error};
+use anyhow::{bail, Error};
+#[cfg(feature = "alloc")]
+use anyhow::anyhow;
 use proc_macro2::{Span, TokenStream};
-use quote::{quote, ToTokens, TokenStreamExt};
-use syn::{parse_str, Ident, Lit, LitByteStr, Meta, MetaList, MetaNameValue, NestedMeta, Path};
+use quote::{quote, ToTokens};
+#[cfg(feature = "alloc")]
+use quote::TokenStreamExt;
+use syn::{parse_str, Ident, Lit, Meta, MetaList, MetaNameValue, NestedMeta, Path};
+#[cfg(feature = "alloc")]
+use syn::LitByteStr;
 
 use crate::field::{bool_attr, set_option, tag_attr, Label};
 
@@ -70,9 +77,11 @@ impl Field {
             | (Some(Label::Required), Some(true), _) => {
                 bail!("packed attribute may only be applied to repeated fields");
             }
+            #[cfg(feature = "alloc")]
             (Some(Label::Repeated), Some(true), _) if !ty.is_numeric() => {
                 bail!("packed attribute may only be applied to numeric types");
             }
+            #[cfg(feature = "alloc")]
             (Some(Label::Repeated), _, true) => {
                 bail!("repeated fields may not have a default value");
             }
@@ -80,9 +89,11 @@ impl Field {
             (None, _, _) => Kind::Plain(default),
             (Some(Label::Optional), _, _) => Kind::Optional(default),
             (Some(Label::Required), _, _) => Kind::Required(default),
+            #[cfg(feature = "alloc")]
             (Some(Label::Repeated), packed, false) if packed.unwrap_or_else(|| ty.is_numeric()) => {
                 Kind::Packed
             }
+            #[cfg(feature = "alloc")]
             (Some(Label::Repeated), _, false) => Kind::Repeated,
         };
 
@@ -98,6 +109,9 @@ impl Field {
                 }
                 Kind::Optional(..) => bail!("invalid optional attribute on oneof field"),
                 Kind::Required(..) => bail!("invalid required attribute on oneof field"),
+                #[cfg(feature = "alloc")]
+                Kind::Packed | Kind::Repeated => bail!("invalid repeated attribute on oneof field"),
+                #[cfg(feature = "alloc")]
                 Kind::Packed | Kind::Repeated => bail!("invalid repeated attribute on oneof field"),
             }
         } else {
@@ -109,7 +123,9 @@ impl Field {
         let module = self.ty.module();
         let encode_fn = match self.kind {
             Kind::Plain(..) | Kind::Optional(..) | Kind::Required(..) => quote!(encode),
+            #[cfg(feature = "alloc")]
             Kind::Repeated => quote!(encode_repeated),
+            #[cfg(feature = "alloc")]
             Kind::Packed => quote!(encode_packed),
         };
         let encode_fn = quote!(::prost::encoding::#module::#encode_fn);
@@ -129,7 +145,12 @@ impl Field {
                     #encode_fn(#tag, value, buf);
                 }
             },
+            #[cfg(feature = "alloc")]
             Kind::Required(..) | Kind::Repeated | Kind::Packed => quote! {
+                #encode_fn(#tag, &#ident, buf);
+            },
+            #[cfg(not(feature = "alloc"))]
+            Kind::Required(..) => quote! {
                 #encode_fn(#tag, &#ident, buf);
             },
         }
@@ -141,12 +162,18 @@ impl Field {
         let module = self.ty.module();
         let merge_fn = match self.kind {
             Kind::Plain(..) | Kind::Optional(..) | Kind::Required(..) => quote!(merge),
+            #[cfg(feature = "alloc")]
             Kind::Repeated | Kind::Packed => quote!(merge_repeated),
         };
         let merge_fn = quote!(::prost::encoding::#module::#merge_fn);
 
         match self.kind {
+            #[cfg(feature = "alloc")]
             Kind::Plain(..) | Kind::Required(..) | Kind::Repeated | Kind::Packed => quote! {
+                #merge_fn(wire_type, #ident, buf, ctx)
+            },
+            #[cfg(not(feature = "alloc"))]
+            Kind::Plain(..) | Kind::Required(..) => quote! {
                 #merge_fn(wire_type, #ident, buf, ctx)
             },
             Kind::Optional(..) => quote! {
@@ -163,7 +190,9 @@ impl Field {
         let module = self.ty.module();
         let encoded_len_fn = match self.kind {
             Kind::Plain(..) | Kind::Optional(..) | Kind::Required(..) => quote!(encoded_len),
+            #[cfg(feature = "alloc")]
             Kind::Repeated => quote!(encoded_len_repeated),
+            #[cfg(feature = "alloc")]
             Kind::Packed => quote!(encoded_len_packed),
         };
         let encoded_len_fn = quote!(::prost::encoding::#module::#encoded_len_fn);
@@ -183,7 +212,12 @@ impl Field {
             Kind::Optional(..) => quote! {
                 #ident.as_ref().map_or(0, |value| #encoded_len_fn(#tag, value))
             },
+            #[cfg(feature = "alloc")]
             Kind::Required(..) | Kind::Repeated | Kind::Packed => quote! {
+                #encoded_len_fn(#tag, &#ident)
+            },
+            #[cfg(not(feature = "alloc"))]
+            Kind::Required(..) => quote! {
                 #encoded_len_fn(#tag, &#ident)
             },
         }
@@ -194,11 +228,13 @@ impl Field {
             Kind::Plain(ref default) | Kind::Required(ref default) => {
                 let default = default.typed();
                 match self.ty {
+                    #[cfg(feature = "alloc")]
                     Ty::String | Ty::Bytes(..) => quote!(#ident.clear()),
                     _ => quote!(#ident = #default),
                 }
             }
             Kind::Optional(_) => quote!(#ident = ::core::option::Option::None),
+            #[cfg(feature = "alloc")]
             Kind::Repeated | Kind::Packed => quote!(#ident.clear()),
         }
     }
@@ -208,6 +244,7 @@ impl Field {
         match self.kind {
             Kind::Plain(ref value) | Kind::Required(ref value) => value.owned(),
             Kind::Optional(_) => quote!(::core::option::Option::None),
+            #[cfg(feature = "alloc")]
             Kind::Repeated | Kind::Packed => quote!(::prost::alloc::vec::Vec::new()),
         }
     }
@@ -248,6 +285,7 @@ impl Field {
                     }
                 }
             },
+            #[cfg(feature = "alloc")]
             Kind::Repeated | Kind::Packed => {
                 quote! {
                     struct #wrapper_name<'a>(&'a ::prost::alloc::vec::Vec<#inner_ty>);
@@ -313,6 +351,7 @@ impl Field {
                         }
                     }
                 }
+                #[cfg(feature = "alloc")]
                 Kind::Repeated | Kind::Packed => {
                     let iter_doc = format!(
                         "Returns an iterator which yields the valid enum values contained in `{}`.",
@@ -380,17 +419,21 @@ pub enum Ty {
     Sfixed32,
     Sfixed64,
     Bool,
+    #[cfg(feature = "alloc")]
     String,
+    #[cfg(feature = "alloc")]
     Bytes(BytesTy),
     Enumeration(Path),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(feature = "alloc")]
 pub enum BytesTy {
     Vec,
     Bytes,
 }
 
+#[cfg(feature = "alloc")]
 impl BytesTy {
     fn try_from_str(s: &str) -> Result<Self, Error> {
         match s {
@@ -424,8 +467,11 @@ impl Ty {
             Meta::Path(ref name) if name.is_ident("sfixed32") => Ty::Sfixed32,
             Meta::Path(ref name) if name.is_ident("sfixed64") => Ty::Sfixed64,
             Meta::Path(ref name) if name.is_ident("bool") => Ty::Bool,
+            #[cfg(feature = "alloc")]
             Meta::Path(ref name) if name.is_ident("string") => Ty::String,
+            #[cfg(feature = "alloc")]
             Meta::Path(ref name) if name.is_ident("bytes") => Ty::Bytes(BytesTy::Vec),
+            #[cfg(feature = "alloc")]
             Meta::NameValue(MetaNameValue {
                 ref path,
                 lit: Lit::Str(ref l),
@@ -457,6 +503,7 @@ impl Ty {
         Ok(Some(ty))
     }
 
+    #[cfg(feature = "alloc")]
     pub fn from_str(s: &str) -> Result<Ty, Error> {
         let enumeration_len = "enumeration".len();
         let error = Err(anyhow!("invalid type: {}", s));
@@ -474,7 +521,9 @@ impl Ty {
             "sfixed32" => Ty::Sfixed32,
             "sfixed64" => Ty::Sfixed64,
             "bool" => Ty::Bool,
+            #[cfg(feature = "alloc")]
             "string" => Ty::String,
+            #[cfg(feature = "alloc")]
             "bytes" => Ty::Bytes(BytesTy::Vec),
             s if s.len() > enumeration_len && &s[..enumeration_len] == "enumeration" => {
                 let s = &s[enumeration_len..].trim();
@@ -510,7 +559,9 @@ impl Ty {
             Ty::Sfixed32 => "sfixed32",
             Ty::Sfixed64 => "sfixed64",
             Ty::Bool => "bool",
+            #[cfg(feature = "alloc")]
             Ty::String => "string",
+            #[cfg(feature = "alloc")]
             Ty::Bytes(..) => "bytes",
             Ty::Enumeration(..) => "enum",
         }
@@ -519,7 +570,9 @@ impl Ty {
     // TODO: rename to 'owned_type'.
     pub fn rust_type(&self) -> TokenStream {
         match self {
+            #[cfg(feature = "alloc")]
             Ty::String => quote!(::prost::alloc::string::String),
+            #[cfg(feature = "alloc")]
             Ty::Bytes(ty) => ty.rust_type(),
             _ => self.rust_ref_type(),
         }
@@ -541,7 +594,9 @@ impl Ty {
             Ty::Sfixed32 => quote!(i32),
             Ty::Sfixed64 => quote!(i64),
             Ty::Bool => quote!(bool),
+            #[cfg(feature = "alloc")]
             Ty::String => quote!(&str),
+            #[cfg(feature = "alloc")]
             Ty::Bytes(..) => quote!(&[u8]),
             Ty::Enumeration(..) => quote!(i32),
         }
@@ -556,7 +611,10 @@ impl Ty {
 
     /// Returns false if the scalar type is length delimited (i.e., `string` or `bytes`).
     pub fn is_numeric(&self) -> bool {
-        !matches!(self, Ty::String | Ty::Bytes(..))
+        #[cfg(feature = "alloc")]
+        return !matches!(self, Ty::String | Ty::Bytes(..));
+        #[cfg(not(feature = "alloc"))]
+        return true;
     }
 }
 
@@ -582,8 +640,10 @@ pub enum Kind {
     /// A required proto2 scalar field.
     Required(DefaultValue),
     /// A repeated scalar field.
+    #[cfg(feature = "alloc")]
     Repeated,
     /// A packed repeated scalar field.
+    #[cfg(feature = "alloc")]
     Packed,
 }
 
@@ -597,9 +657,12 @@ pub enum DefaultValue {
     U32(u32),
     U64(u64),
     Bool(bool),
+    #[cfg(feature = "alloc")]
     String(String),
+    #[cfg(feature = "alloc")]
     Bytes(Vec<u8>),
     Enumeration(TokenStream),
+    #[cfg(feature = "alloc")]
     Path(Path),
 }
 
@@ -648,13 +711,16 @@ impl DefaultValue {
             Lit::Int(ref lit) if *ty == Ty::Double => DefaultValue::F64(lit.base10_parse()?),
 
             Lit::Bool(ref lit) if *ty == Ty::Bool => DefaultValue::Bool(lit.value),
+            #[cfg(feature = "alloc")]
             Lit::Str(ref lit) if *ty == Ty::String => DefaultValue::String(lit.value()),
+            #[cfg(feature = "alloc")]
             Lit::ByteStr(ref lit)
                 if *ty == Ty::Bytes(BytesTy::Bytes) || *ty == Ty::Bytes(BytesTy::Vec) =>
             {
                 DefaultValue::Bytes(lit.value())
             }
 
+            #[cfg(feature = "alloc")]
             Lit::Str(ref lit) => {
                 let value = lit.value();
                 let value = value.trim();
@@ -757,7 +823,9 @@ impl DefaultValue {
             Ty::Uint64 | Ty::Fixed64 => DefaultValue::U64(0),
 
             Ty::Bool => DefaultValue::Bool(false),
+            #[cfg(feature = "alloc")]
             Ty::String => DefaultValue::String(String::new()),
+            #[cfg(feature = "alloc")]
             Ty::Bytes(..) => DefaultValue::Bytes(Vec::new()),
             Ty::Enumeration(ref path) => DefaultValue::Enumeration(quote!(#path::default())),
         }
@@ -765,13 +833,17 @@ impl DefaultValue {
 
     pub fn owned(&self) -> TokenStream {
         match *self {
+            #[cfg(feature = "alloc")]
             DefaultValue::String(ref value) if value.is_empty() => {
                 quote!(::prost::alloc::string::String::new())
             }
+            #[cfg(feature = "alloc")]
             DefaultValue::String(ref value) => quote!(#value.into()),
+            #[cfg(feature = "alloc")]
             DefaultValue::Bytes(ref value) if value.is_empty() => {
                 quote!(::core::default::Default::default())
             }
+            #[cfg(feature = "alloc")]
             DefaultValue::Bytes(ref value) => {
                 let lit = LitByteStr::new(value, Span::call_site());
                 quote!(#lit.as_ref().into())
@@ -800,12 +872,15 @@ impl ToTokens for DefaultValue {
             DefaultValue::U32(value) => value.to_tokens(tokens),
             DefaultValue::U64(value) => value.to_tokens(tokens),
             DefaultValue::Bool(value) => value.to_tokens(tokens),
+            #[cfg(feature = "alloc")]
             DefaultValue::String(ref value) => value.to_tokens(tokens),
+            #[cfg(feature = "alloc")]
             DefaultValue::Bytes(ref value) => {
                 let byte_str = LitByteStr::new(value, Span::call_site());
                 tokens.append_all(quote!(#byte_str as &[u8]));
             }
             DefaultValue::Enumeration(ref value) => value.to_tokens(tokens),
+            #[cfg(feature = "alloc")]
             DefaultValue::Path(ref value) => value.to_tokens(tokens),
         }
     }

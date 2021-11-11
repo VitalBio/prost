@@ -1,4 +1,5 @@
 mod group;
+#[cfg(feature = "alloc")]
 mod map;
 mod message;
 mod oneof;
@@ -19,6 +20,7 @@ pub enum Field {
     /// A message field.
     Message(message::Field),
     /// A map field.
+    #[cfg(feature = "alloc")]
     Map(map::Field),
     /// A oneof field.
     Oneof(oneof::Field),
@@ -31,6 +33,7 @@ impl Field {
     ///
     /// If the meta items are invalid, an error will be returned.
     /// If the field should be ignored, `None` is returned.
+    #[cfg(feature = "alloc")]
     pub fn new(attrs: Vec<Attribute>, inferred_tag: Option<u32>) -> Result<Option<Field>, Error> {
         let attrs = prost_attrs(attrs);
 
@@ -52,11 +55,32 @@ impl Field {
 
         Ok(Some(field))
     }
+    #[cfg(not(feature = "alloc"))]
+    pub fn new(attrs: Vec<Attribute>, inferred_tag: Option<u32>) -> Result<Option<Field>, Error> {
+        let attrs = prost_attrs(attrs);
+
+        // TODO: check for ignore attribute.
+
+        let field = if let Some(field) = scalar::Field::new(&attrs, inferred_tag)? {
+            Field::Scalar(field)
+        } else if let Some(field) = message::Field::new(&attrs, inferred_tag)? {
+            Field::Message(field)
+        } else if let Some(field) = oneof::Field::new(&attrs)? {
+            Field::Oneof(field)
+        } else if let Some(field) = group::Field::new(&attrs, inferred_tag)? {
+            Field::Group(field)
+        } else {
+            bail!("no type attribute");
+        };
+
+        Ok(Some(field))
+    }
 
     /// Creates a new oneof `Field` from an iterator of field attributes.
     ///
     /// If the meta items are invalid, an error will be returned.
     /// If the field should be ignored, `None` is returned.
+    #[cfg(feature = "alloc")]
     pub fn new_oneof(attrs: Vec<Attribute>) -> Result<Option<Field>, Error> {
         let attrs = prost_attrs(attrs);
 
@@ -68,7 +92,25 @@ impl Field {
             Field::Message(field)
         } else if let Some(field) = map::Field::new_oneof(&attrs)? {
             Field::Map(field)
-        } else if let Some(field) = group::Field::new_oneof(&attrs)? {
+        }  else if let Some(field) = group::Field::new_oneof(&attrs)? {
+            Field::Group(field)
+        } else {
+            bail!("no type attribute for oneof field");
+        };
+
+        Ok(Some(field))
+    }
+    #[cfg(not(feature = "alloc"))]
+    pub fn new_oneof(attrs: Vec<Attribute>) -> Result<Option<Field>, Error> {
+        let attrs = prost_attrs(attrs);
+
+        // TODO: check for ignore attribute.
+
+        let field = if let Some(field) = scalar::Field::new_oneof(&attrs)? {
+            Field::Scalar(field)
+        } else if let Some(field) = message::Field::new_oneof(&attrs)? {
+            Field::Message(field)
+        }  else if let Some(field) = group::Field::new_oneof(&attrs)? {
             Field::Group(field)
         } else {
             bail!("no type attribute for oneof field");
@@ -81,6 +123,7 @@ impl Field {
         match *self {
             Field::Scalar(ref scalar) => vec![scalar.tag],
             Field::Message(ref message) => vec![message.tag],
+            #[cfg(feature = "alloc")]
             Field::Map(ref map) => vec![map.tag],
             Field::Oneof(ref oneof) => oneof.tags.clone(),
             Field::Group(ref group) => vec![group.tag],
@@ -92,6 +135,7 @@ impl Field {
         match *self {
             Field::Scalar(ref scalar) => scalar.encode(ident),
             Field::Message(ref message) => message.encode(ident),
+            #[cfg(feature = "alloc")]
             Field::Map(ref map) => map.encode(ident),
             Field::Oneof(ref oneof) => oneof.encode(ident),
             Field::Group(ref group) => group.encode(ident),
@@ -104,6 +148,7 @@ impl Field {
         match *self {
             Field::Scalar(ref scalar) => scalar.merge(ident),
             Field::Message(ref message) => message.merge(ident),
+            #[cfg(feature = "alloc")]
             Field::Map(ref map) => map.merge(ident),
             Field::Oneof(ref oneof) => oneof.merge(ident),
             Field::Group(ref group) => group.merge(ident),
@@ -114,6 +159,7 @@ impl Field {
     pub fn encoded_len(&self, ident: TokenStream) -> TokenStream {
         match *self {
             Field::Scalar(ref scalar) => scalar.encoded_len(ident),
+            #[cfg(feature = "alloc")]
             Field::Map(ref map) => map.encoded_len(ident),
             Field::Message(ref msg) => msg.encoded_len(ident),
             Field::Oneof(ref oneof) => oneof.encoded_len(ident),
@@ -126,6 +172,7 @@ impl Field {
         match *self {
             Field::Scalar(ref scalar) => scalar.clear(ident),
             Field::Message(ref message) => message.clear(ident),
+            #[cfg(feature = "alloc")]
             Field::Map(ref map) => map.clear(ident),
             Field::Oneof(ref oneof) => oneof.clear(ident),
             Field::Group(ref group) => group.clear(ident),
@@ -151,6 +198,7 @@ impl Field {
                     }
                 }
             }
+            #[cfg(feature = "alloc")]
             Field::Map(ref map) => {
                 let wrapper = map.debug(quote!(MapWrapper));
                 quote! {
@@ -167,6 +215,7 @@ impl Field {
     pub fn methods(&self, ident: &Ident) -> Option<TokenStream> {
         match *self {
             Field::Scalar(ref scalar) => scalar.methods(ident),
+            #[cfg(feature = "alloc")]
             Field::Map(ref map) => map.methods(ident),
             _ => None,
         }
@@ -180,6 +229,7 @@ pub enum Label {
     /// A required field.
     Required,
     /// A repeated field.
+    #[cfg(feature = "alloc")]
     Repeated,
 }
 
@@ -188,12 +238,16 @@ impl Label {
         match self {
             Label::Optional => "optional",
             Label::Required => "required",
+            #[cfg(feature = "alloc")]
             Label::Repeated => "repeated",
         }
     }
 
     fn variants() -> slice::Iter<'static, Label> {
+        #[cfg(feature = "alloc")]
         const VARIANTS: &[Label] = &[Label::Optional, Label::Required, Label::Repeated];
+        #[cfg(not(feature = "alloc"))]
+        const VARIANTS: &[Label] = &[Label::Optional, Label::Required];
         VARIANTS.iter()
     }
 

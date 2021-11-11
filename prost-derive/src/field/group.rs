@@ -81,6 +81,7 @@ impl Field {
             Label::Required => quote! {
                 ::prost::encoding::group::encode(#tag, &#ident, buf);
             },
+            #[cfg(feature = "alloc")]
             Label::Repeated => quote! {
                 for msg in &#ident {
                     ::prost::encoding::group::encode(#tag, msg, buf);
@@ -103,6 +104,7 @@ impl Field {
             Label::Required => quote! {
                 ::prost::encoding::group::merge(tag, wire_type, #ident, buf, ctx)
             },
+            #[cfg(feature = "alloc")]
             Label::Repeated => quote! {
                 ::prost::encoding::group::merge_repeated(tag, wire_type, #ident, buf, ctx)
             },
@@ -118,6 +120,7 @@ impl Field {
             Label::Required => quote! {
                 ::prost::encoding::group::encoded_len(#tag, &#ident)
             },
+            #[cfg(feature = "alloc")]
             Label::Repeated => quote! {
                 ::prost::encoding::group::encoded_len_repeated(#tag, &#ident)
             },
@@ -128,6 +131,7 @@ impl Field {
         match self.label {
             Label::Optional => quote!(#ident = ::core::option::Option::None),
             Label::Required => quote!(#ident.clear()),
+            #[cfg(feature = "alloc")]
             Label::Repeated => quote!(#ident.clear()),
         }
     }
