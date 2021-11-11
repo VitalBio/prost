@@ -4,18 +4,27 @@
 
 #![allow(clippy::implicit_hasher, clippy::ptr_arg)]
 
+#[cfg(feature = "alloc")]
 use alloc::collections::BTreeMap;
+#[cfg(feature = "alloc")]
 use alloc::format;
+#[cfg(feature = "alloc")]
 use alloc::string::String;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::cmp::min;
 use core::convert::TryFrom;
+#[cfg(feature = "alloc")]
 use core::mem;
+#[cfg(feature = "alloc")]
 use core::str;
 use core::u32;
 use core::usize;
 
+#[cfg(feature = "alloc")]
 use ::bytes::{Buf, BufMut, Bytes};
+#[cfg(not(feature = "alloc"))]
+use ::bytes::{Buf, BufMut};
 
 use crate::DecodeError;
 use crate::Message;
@@ -47,7 +56,10 @@ where
     let bytes = buf.chunk();
     let len = bytes.len();
     if len == 0 {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new("invalid varint"));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
 
     let byte = bytes[0];
@@ -156,7 +168,10 @@ fn decode_varint_slice(bytes: &[u8]) -> Result<(u64, usize), DecodeError> {
 
     // We have overrun the maximum size of a varint (10 bytes) or the final byte caused an overflow.
     // Assume the data is corrupt.
-    Err(DecodeError::new("invalid varint"))
+    #[cfg(feature = "alloc")]
+    return Err(DecodeError::new("invalid varint"));
+    #[cfg(not(feature = "alloc"))]
+    return Err(DecodeError::new());
 }
 
 /// Decodes a LEB128-encoded variable length integer from the buffer, advancing the buffer as
@@ -179,14 +194,20 @@ where
             // Check for u64::MAX overflow. See [`ConsumeVarint`][1] for details.
             // [1]: https://github.com/protocolbuffers/protobuf-go/blob/v1.27.1/encoding/protowire/wire.go#L358
             if count == 9 && byte >= 0x02 {
+                #[cfg(feature = "alloc")]
                 return Err(DecodeError::new("invalid varint"));
+                #[cfg(not(feature = "alloc"))]
+                return Err(DecodeError::new());
             } else {
                 return Ok(value);
             }
         }
     }
 
-    Err(DecodeError::new("invalid varint"))
+    #[cfg(feature = "alloc")]
+    return Err(DecodeError::new("invalid varint"));
+    #[cfg(not(feature = "alloc"))]
+    return Err(DecodeError::new());
 }
 
 /// Additional information passed to every decode/merge function.
@@ -250,7 +271,10 @@ impl DecodeContext {
     #[inline]
     pub(crate) fn limit_reached(&self) -> Result<(), DecodeError> {
         if self.recurse_count == 0 {
-            Err(DecodeError::new("recursion limit reached"))
+            #[cfg(feature = "alloc")]
+            return Err(DecodeError::new("recursion limit reached"));
+            #[cfg(not(feature = "alloc"))]
+            return Err(DecodeError::new());
         } else {
             Ok(())
         }
@@ -299,10 +323,15 @@ impl TryFrom<u64> for WireType {
             3 => Ok(WireType::StartGroup),
             4 => Ok(WireType::EndGroup),
             5 => Ok(WireType::ThirtyTwoBit),
-            _ => Err(DecodeError::new(format!(
-                "invalid wire type value: {}",
-                value
-            ))),
+            _ => {
+                #[cfg(feature = "alloc")]
+                return Err(DecodeError::new(format!(
+                            "invalid wire type value: {}",
+                            value
+                )));
+                #[cfg(not(feature = "alloc"))]
+                return Err(DecodeError::new());
+            },
         }
     }
 }
@@ -328,13 +357,19 @@ where
 {
     let key = decode_varint(buf)?;
     if key > u64::from(u32::MAX) {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new(format!("invalid key value: {}", key)));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
     let wire_type = WireType::try_from(key & 0x07)?;
     let tag = key as u32 >> 3;
 
     if tag < MIN_TAG {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new("invalid tag value: 0"));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
 
     Ok((tag, wire_type))
@@ -352,10 +387,13 @@ pub fn key_len(tag: u32) -> usize {
 #[inline]
 pub fn check_wire_type(expected: WireType, actual: WireType) -> Result<(), DecodeError> {
     if expected != actual {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new(format!(
             "invalid wire type: {:?} (expected {:?})",
             actual, expected
         )));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
     Ok(())
 }
@@ -375,7 +413,10 @@ where
     let len = decode_varint(buf)?;
     let remaining = buf.remaining();
     if len > remaining as u64 {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new("buffer underflow"));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
 
     let limit = remaining - len as usize;
@@ -384,7 +425,10 @@ where
     }
 
     if buf.remaining() != limit {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new("delimited length exceeded"));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
     Ok(())
 }
@@ -409,18 +453,29 @@ where
             match inner_wire_type {
                 WireType::EndGroup => {
                     if inner_tag != tag {
+                        #[cfg(feature = "alloc")]
                         return Err(DecodeError::new("unexpected end group tag"));
+                        #[cfg(not(feature = "alloc"))]
+                        return Err(DecodeError::new());
                     }
                     break 0;
                 }
                 _ => skip_field(inner_wire_type, inner_tag, buf, ctx.enter_recursion())?,
             }
         },
-        WireType::EndGroup => return Err(DecodeError::new("unexpected end group tag")),
+        WireType::EndGroup => {
+            #[cfg(feature = "alloc")]
+            return Err(DecodeError::new("unexpected end group tag"));
+            #[cfg(not(feature = "alloc"))]
+            return Err(DecodeError::new());
+        },
     };
 
     if len > buf.remaining() as u64 {
+        #[cfg(feature = "alloc")]
         return Err(DecodeError::new("buffer underflow"));
+        #[cfg(not(feature = "alloc"))]
+        return Err(DecodeError::new());
     }
 
     buf.advance(len as usize);
@@ -428,6 +483,7 @@ where
 }
 
 /// Helper macro which emits an `encode_repeated` function for the type.
+#[cfg(feature = "alloc")]
 macro_rules! encode_repeated {
     ($ty:ty) => {
         pub fn encode_repeated<B>(tag: u32, values: &[$ty], buf: &mut B)
@@ -442,6 +498,7 @@ macro_rules! encode_repeated {
 }
 
 /// Helper macro which emits a `merge_repeated` function for the numeric type.
+#[cfg(feature = "alloc")]
 macro_rules! merge_repeated_numeric {
     ($ty:ty,
      $wire_type:expr,
@@ -507,6 +564,7 @@ macro_rules! varint {
                 Ok(())
             }
 
+            #[cfg(feature = "alloc")]
             encode_repeated!($ty);
 
             pub fn encode_packed<B>(tag: u32, values: &[$ty], buf: &mut B) where B: BufMut {
@@ -523,6 +581,7 @@ macro_rules! varint {
                 }
             }
 
+            #[cfg(feature = "alloc")]
             merge_repeated_numeric!($ty, WireType::Varint, merge, merge_repeated);
 
             #[inline]
@@ -531,6 +590,7 @@ macro_rules! varint {
             }
 
             #[inline]
+            #[cfg(feature = "alloc")]
             pub fn encoded_len_repeated(tag: u32, values: &[$ty]) -> usize {
                 key_len(tag) * values.len() + values.iter().map(|$to_uint64_value| {
                     encoded_len_varint($to_uint64)
@@ -554,10 +614,9 @@ macro_rules! varint {
                 use proptest::prelude::*;
 
                 use crate::encoding::$proto_ty::*;
-                use crate::encoding::test::{
-                    check_collection_type,
-                    check_type,
-                };
+                use crate::encoding::test::check_type;
+                #[cfg(feature = "alloc")]
+                use crate::encoding::test::check_collection_type;
 
                 proptest! {
                     #[test]
@@ -566,12 +625,14 @@ macro_rules! varint {
                                    encode, merge, encoded_len)?;
                     }
                     #[test]
+                    #[cfg(feature = "alloc")]
                     fn check_repeated(value: Vec<$ty>, tag in MIN_TAG..=MAX_TAG) {
                         check_collection_type(value, tag, WireType::Varint,
                                               encode_repeated, merge_repeated,
                                               encoded_len_repeated)?;
                     }
                     #[test]
+                    #[cfg(feature = "alloc")]
                     fn check_packed(value: Vec<$ty>, tag in MIN_TAG..=MAX_TAG) {
                         check_type(value, tag, WireType::LengthDelimited,
                                    encode_packed, merge_repeated,
@@ -637,12 +698,16 @@ macro_rules! fixed_width {
             {
                 check_wire_type($wire_type, wire_type)?;
                 if buf.remaining() < $width {
+                    #[cfg(feature = "alloc")]
                     return Err(DecodeError::new("buffer underflow"));
+                    #[cfg(not(feature = "alloc"))]
+                    return Err(DecodeError::new());
                 }
                 *value = buf.$get();
                 Ok(())
             }
 
+            #[cfg(feature = "alloc")]
             encode_repeated!($ty);
 
             pub fn encode_packed<B>(tag: u32, values: &[$ty], buf: &mut B)
@@ -662,6 +727,7 @@ macro_rules! fixed_width {
                 }
             }
 
+            #[cfg(feature = "alloc")]
             merge_repeated_numeric!($ty, $wire_type, merge, merge_repeated);
 
             #[inline]
@@ -670,6 +736,7 @@ macro_rules! fixed_width {
             }
 
             #[inline]
+            #[cfg(feature = "alloc")]
             pub fn encoded_len_repeated(tag: u32, values: &[$ty]) -> usize {
                 (key_len(tag) + $width) * values.len()
             }
@@ -688,7 +755,9 @@ macro_rules! fixed_width {
             mod test {
                 use proptest::prelude::*;
 
-                use super::super::test::{check_collection_type, check_type};
+                use super::super::test::check_type;
+                #[cfg(feature = "alloc")]
+                use super::super::test::check_collection_type;
                 use super::*;
 
                 proptest! {
@@ -698,12 +767,14 @@ macro_rules! fixed_width {
                                    encode, merge, encoded_len)?;
                     }
                     #[test]
+                    #[cfg(feature = "alloc")]
                     fn check_repeated(value: Vec<$ty>, tag in MIN_TAG..=MAX_TAG) {
                         check_collection_type(value, tag, $wire_type,
                                               encode_repeated, merge_repeated,
                                               encoded_len_repeated)?;
                     }
                     #[test]
+                    #[cfg(feature = "alloc")]
                     fn check_packed(value: Vec<$ty>, tag in MIN_TAG..=MAX_TAG) {
                         check_type(value, tag, WireType::LengthDelimited,
                                    encode_packed, merge_repeated,
@@ -764,6 +835,7 @@ fixed_width!(
 );
 
 /// Macro which emits encoding functions for a length-delimited type.
+#[cfg(feature = "alloc")]
 macro_rules! length_delimited {
     ($ty:ty) => {
         encode_repeated!($ty);
@@ -800,6 +872,7 @@ macro_rules! length_delimited {
     };
 }
 
+#[cfg(feature = "alloc")]
 pub mod string {
     use super::*;
 
@@ -850,9 +923,14 @@ pub mod string {
                     mem::forget(drop_guard);
                     Ok(())
                 }
-                Err(_) => Err(DecodeError::new(
+                Err(_) => {
+                    #[cfg(feature = "alloc")]
+                    return Err(DecodeError::new(
                     "invalid string value: data is not UTF-8 encoded",
-                )),
+                    ));
+                    #[cfg(not(feature = "alloc"))]
+                    return Err(DecodeError::new());
+                },
             }
         }
     }
@@ -873,6 +951,7 @@ pub mod string {
                                         encode, merge, encoded_len)?;
             }
             #[test]
+            #[cfg(feature = "alloc")]
             fn check_repeated(value: Vec<String>, tag in MIN_TAG..=MAX_TAG) {
                 super::test::check_collection_type(value, tag, WireType::LengthDelimited,
                                                    encode_repeated, merge_repeated,
@@ -882,8 +961,10 @@ pub mod string {
     }
 }
 
+#[cfg(feature = "alloc")]
 pub trait BytesAdapter: sealed::BytesAdapter {}
 
+#[cfg(feature = "alloc")]
 mod sealed {
     use super::{Buf, BufMut};
 
@@ -906,8 +987,10 @@ mod sealed {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl BytesAdapter for Bytes {}
 
+#[cfg(feature = "alloc")]
 impl sealed::BytesAdapter for Bytes {
     fn len(&self) -> usize {
         Buf::remaining(self)
@@ -928,8 +1011,10 @@ impl sealed::BytesAdapter for Bytes {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl BytesAdapter for Vec<u8> {}
 
+#[cfg(feature = "alloc")]
 impl sealed::BytesAdapter for Vec<u8> {
     fn len(&self) -> usize {
         Vec::len(self)
@@ -952,6 +1037,7 @@ impl sealed::BytesAdapter for Vec<u8> {
     }
 }
 
+#[cfg(feature = "alloc")]
 pub mod bytes {
     use super::*;
 
@@ -978,7 +1064,10 @@ pub mod bytes {
         check_wire_type(WireType::LengthDelimited, wire_type)?;
         let len = decode_varint(buf)?;
         if len > buf.remaining() as u64 {
+            #[cfg(feature = "alloc")]
             return Err(DecodeError::new("buffer underflow"));
+            #[cfg(not(feature = "alloc"))]
+            return Err(DecodeError::new());
         }
         let len = len as usize;
 
@@ -1018,6 +1107,7 @@ pub mod bytes {
             }
 
             #[test]
+            #[cfg(feature = "alloc")]
             fn check_repeated_vec(value: Vec<Vec<u8>>, tag in MIN_TAG..=MAX_TAG) {
                 super::test::check_collection_type(value, tag, WireType::LengthDelimited,
                                                    encode_repeated, merge_repeated,
@@ -1025,6 +1115,7 @@ pub mod bytes {
             }
 
             #[test]
+            #[cfg(feature = "alloc")]
             fn check_repeated_bytes(value: Vec<Vec<u8>>, tag in MIN_TAG..=MAX_TAG) {
                 let value = value.into_iter().map(Bytes::from).collect();
                 super::test::check_collection_type(value, tag, WireType::LengthDelimited,
@@ -1071,6 +1162,7 @@ pub mod message {
         )
     }
 
+    #[cfg(feature = "alloc")]
     pub fn encode_repeated<M, B>(tag: u32, messages: &[M], buf: &mut B)
     where
         M: Message,
@@ -1081,6 +1173,7 @@ pub mod message {
         }
     }
 
+    #[cfg(feature = "alloc")]
     pub fn merge_repeated<M, B>(
         wire_type: WireType,
         messages: &mut Vec<M>,
@@ -1108,6 +1201,7 @@ pub mod message {
     }
 
     #[inline]
+    #[cfg(feature = "alloc")]
     pub fn encoded_len_repeated<M>(tag: u32, messages: &[M]) -> usize
     where
         M: Message,
@@ -1152,7 +1246,10 @@ pub mod group {
             let (field_tag, field_wire_type) = decode_key(buf)?;
             if field_wire_type == WireType::EndGroup {
                 if field_tag != tag {
+                    #[cfg(feature = "alloc")]
                     return Err(DecodeError::new("unexpected end group tag"));
+                    #[cfg(not(feature = "alloc"))]
+                    return Err(DecodeError::new());
                 }
                 return Ok(());
             }
@@ -1161,6 +1258,7 @@ pub mod group {
         }
     }
 
+    #[cfg(feature = "alloc")]
     pub fn encode_repeated<M, B>(tag: u32, messages: &[M], buf: &mut B)
     where
         M: Message,
@@ -1171,6 +1269,7 @@ pub mod group {
         }
     }
 
+    #[cfg(feature = "alloc")]
     pub fn merge_repeated<M, B>(
         tag: u32,
         wire_type: WireType,
@@ -1198,6 +1297,7 @@ pub mod group {
     }
 
     #[inline]
+    #[cfg(feature = "alloc")]
     pub fn encoded_len_repeated<M>(tag: u32, messages: &[M]) -> usize
     where
         M: Message,
@@ -1208,6 +1308,7 @@ pub mod group {
 
 /// Rust doesn't have a `Map` trait, so macros are currently the best way to be
 /// generic over `HashMap` and `BTreeMap`.
+#[cfg(feature = "alloc")]
 macro_rules! map {
     ($map_ty:ident) => {
         use crate::encoding::*;
@@ -1399,6 +1500,7 @@ pub mod hash_map {
     map!(HashMap);
 }
 
+#[cfg(feature = "alloc")]
 pub mod btree_map {
     map!(BTreeMap);
 }
@@ -1406,6 +1508,8 @@ pub mod btree_map {
 #[cfg(test)]
 mod test {
     use alloc::string::ToString;
+    use alloc::format;
+    use alloc::vec::Vec;
     use core::borrow::Borrow;
     use core::fmt::Debug;
     use core::u64;
@@ -1501,6 +1605,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(feature = "alloc")]
     pub fn check_collection_type<T, B, E, M, L>(
         value: T,
         tag: u32,
@@ -1569,6 +1674,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "alloc")]
     fn string_merge_invalid_utf8() {
         let mut s = String::new();
         let buf = b"\x02\x80\x80";

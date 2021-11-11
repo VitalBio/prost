@@ -5,18 +5,25 @@
 //! the `prost-types` crate in order to avoid a cyclic dependency between `prost` and
 //! `prost-build`.
 
+#[cfg(feature = "alloc")]
 use alloc::string::String;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
+#[cfg(feature = "alloc")]
 use ::bytes::{Buf, BufMut, Bytes};
+#[cfg(not(feature = "alloc"))]
+use ::bytes::{Buf, BufMut};
 
 use crate::{
     encoding::{
-        bool, bytes, double, float, int32, int64, skip_field, string, uint32, uint64,
+        bool, double, float, int32, int64, skip_field, uint32, uint64, 
         DecodeContext, WireType,
     },
     DecodeError, Message,
 };
+#[cfg(feature = "alloc")]
+use crate::encoding::{string, bytes};
 
 /// `google.protobuf.BoolValue`
 impl Message for bool {
@@ -285,6 +292,7 @@ impl Message for f64 {
 }
 
 /// `google.protobuf.StringValue`
+#[cfg(feature = "alloc")]
 impl Message for String {
     fn encode_raw<B>(&self, buf: &mut B)
     where
@@ -323,6 +331,7 @@ impl Message for String {
 }
 
 /// `google.protobuf.BytesValue`
+#[cfg(feature = "alloc")]
 impl Message for Vec<u8> {
     fn encode_raw<B>(&self, buf: &mut B)
     where
@@ -361,6 +370,7 @@ impl Message for Vec<u8> {
 }
 
 /// `google.protobuf.BytesValue`
+#[cfg(feature = "alloc")]
 impl Message for Bytes {
     fn encode_raw<B>(&self, buf: &mut B)
     where
