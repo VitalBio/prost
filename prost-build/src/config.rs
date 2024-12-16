@@ -34,7 +34,7 @@ pub enum AttributeOf {
     /// `enum_attribute`.
     Enum,
     /// `field_attribute`.
-    Field(String),
+    Field,
 }
 
 #[derive(Clone)]
@@ -105,7 +105,7 @@ pub trait ConfigCallbacks {
     }
 
     fn field_attribute(&self, package: String, fq_message_name: String, descriptor: TypeDescriptor, field_name: String, field: FieldDescriptor) -> impl Iterator<Item = &String> {
-        self.attribute(Attribute { attribute_of: AttributeOf::Field(field_name.clone()), package, fq_message_name, type_: descriptor, field: Some((field_name, field)) })
+        self.attribute(Attribute { attribute_of: AttributeOf::Field, package, fq_message_name, type_: descriptor, field: Some((field_name, field)) })
     }
 }
 
@@ -122,7 +122,7 @@ impl ConfigCallbacks for DefaultCallbacks {
             AttributeOf::Message => self.message_attributes.get(&attribute.fq_message_name),
             AttributeOf::Type => self.type_attributes.get(&attribute.fq_message_name),
             AttributeOf::Enum => self.enum_attributes.get(&attribute.fq_message_name),
-            AttributeOf::Field(field_name) => self.field_attributes.get_field(&attribute.fq_message_name, &field_name)
+            AttributeOf::Field => self.field_attributes.get_field(&attribute.fq_message_name, &attribute.field.map(|x| x.0.clone()).unwrap_or("".to_string()))
         }
     }
 }
