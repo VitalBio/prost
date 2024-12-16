@@ -116,6 +116,17 @@ pub struct DefaultCallbacks {
     pub(crate) field_attributes: PathMap<String>,
 }
 
+impl DefaultCallbacks {
+    pub fn new() -> Self {
+        Self {
+            type_attributes: PathMap::default(),
+            message_attributes: PathMap::default(),
+            enum_attributes: PathMap::default(),
+            field_attributes: PathMap::default(),
+        }
+    }
+}
+
 impl ConfigCallbacks for DefaultCallbacks {
     fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = &String> {
         match attribute.attribute_of {
@@ -1302,12 +1313,7 @@ impl default::Default for Config {
             prost_path: None,
             #[cfg(feature = "format")]
             fmt: true,
-            callbacks: DefaultCallbacks {
-                type_attributes: PathMap::default(),
-                message_attributes: PathMap::default(),
-                enum_attributes: PathMap::default(),
-                field_attributes: PathMap::default(),
-            },
+            callbacks: DefaultCallbacks::new(),
         }
     }
 }
