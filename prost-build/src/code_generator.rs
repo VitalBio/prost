@@ -18,7 +18,7 @@ use crate::ast::{Comments, Method, Service};
 use crate::extern_paths::ExternPaths;
 use crate::ident::{strip_enum_prefix, to_snake, to_upper_camel};
 use crate::message_graph::MessageGraph;
-use crate::{Config, ConfigCallbacks, EnumDescriptor, FieldDescriptor, MessageDescriptor, TypeDescriptor};
+use crate::{ConfigT, ConfigCallbacks, EnumDescriptor, FieldDescriptor, MessageDescriptor, TypeDescriptor};
 
 mod c_escaping;
 use c_escaping::unescape_c_escape_string;
@@ -27,7 +27,7 @@ mod syntax;
 use syntax::Syntax;
 
 pub struct CodeGenerator<'a, C: ConfigCallbacks> {
-    config: &'a mut Config<C>,
+    config: &'a mut ConfigT<C>,
     package: String,
     type_path: Vec<String>,
     source_info: Option<SourceCodeInfo>,
@@ -45,7 +45,7 @@ fn push_indent(buf: &mut String, depth: u8) {
     }
 }
 
-fn prost_path<C: ConfigCallbacks>(config: &Config<C>) -> &str {
+fn prost_path<C: ConfigCallbacks>(config: &ConfigT<C>) -> &str {
     config.prost_path.as_deref().unwrap_or("::prost")
 }
 
@@ -89,7 +89,7 @@ impl OneofField {
 
 impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
     pub fn generate(
-        config: &mut Config<C>,
+        config: &mut ConfigT<C>,
         message_graph: &MessageGraph,
         extern_paths: &ExternPaths,
         file: FileDescriptorProto,

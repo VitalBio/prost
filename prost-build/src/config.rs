@@ -83,7 +83,7 @@ impl ConfigCallbacks for DefaultCallbacks {
 /// Configuration options for Protobuf code generation.
 ///
 /// This configuration builder can be used to set non-default code generation options.
-pub struct Config<C: ConfigCallbacks> {
+pub struct ConfigT<C: ConfigCallbacks> {
     pub(crate) file_descriptor_set_path: Option<PathBuf>,
     pub(crate) service_generator: Option<Box<dyn ServiceGenerator>>,
     pub(crate) map_type: PathMap<MapType>,
@@ -108,7 +108,9 @@ pub struct Config<C: ConfigCallbacks> {
     pub(crate) callbacks: C,
 }
 
-impl Config<DefaultCallbacks> {
+pub type Config = ConfigT<DefaultCallbacks>;
+
+impl Config {
     /// Creates a new code generator configuration with default options.
     pub fn new() -> Self {
         Config::default()
@@ -286,9 +288,9 @@ impl Config<DefaultCallbacks> {
 
 }
 
-impl<C: ConfigCallbacks> Config<C> {
-    pub fn callback<D: ConfigCallbacks>(self, callbacks: D) -> Config<D> {
-        Config {
+impl<C: ConfigCallbacks> ConfigT<C> {
+    pub fn callback<D: ConfigCallbacks>(self, callbacks: D) -> ConfigT<D> {
+        ConfigT {
             file_descriptor_set_path: self.file_descriptor_set_path,
             service_generator: self.service_generator,
             map_type: self.map_type,
@@ -1229,7 +1231,7 @@ fn write_file_if_changed(path: &Path, content: &[u8]) -> std::io::Result<()> {
     }
 }
 
-impl default::Default for Config<DefaultCallbacks> {
+impl default::Default for Config {
     fn default() -> Self {
         Self {
             file_descriptor_set_path: None,
@@ -1263,7 +1265,7 @@ impl default::Default for Config<DefaultCallbacks> {
     }
 }
 
-impl<C: ConfigCallbacks + fmt::Debug> fmt::Debug for Config<C> {
+impl<C: ConfigCallbacks + fmt::Debug> fmt::Debug for ConfigT<C> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("Config")
             .field("file_descriptor_set_path", &self.file_descriptor_set_path)
