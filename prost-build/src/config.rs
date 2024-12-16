@@ -24,6 +24,7 @@ use crate::MapType;
 use crate::Module;
 use crate::ServiceGenerator;
 
+#[derive(Clone)]
 /// Denotes point where the method was invoked in the code generator.
 pub enum AttributeOf {
     /// `type_attribute`.
@@ -67,6 +68,7 @@ impl TypeDescriptor {
     }
 }
 
+#[derive(Clone)]
 pub struct Attribute {
     /// Context of this call.
     pub attribute_of: AttributeOf,
