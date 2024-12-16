@@ -24,21 +24,63 @@ use crate::MapType;
 use crate::Module;
 use crate::ServiceGenerator;
 
-pub enum TypeDescriptor {
+/// Denotes point where the method was invoked in the code generator.
+pub enum AttributeOf {
+    /// `type_attribute`.
+    Type,
+    /// `message_attribute`.
+    Message,
+    /// `enum_attribute`.
+    Enum,
+    /// `field_attribute`.
+    Field(String),
+}
+
+#[derive(Clone)]
+pub enum MessageDescriptor {
     Message(DescriptorProto),
     Oneof(OneofDescriptorProto),
+}
+
+impl MessageDescriptor {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Message(d) => d.name(),
+            // let oneof_name = format!("{}.{}", fq_message_name, oneof.descriptor.name());
+            Self::Oneof(d) => d.name(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum TypeDescriptor {
+    Message(MessageDescriptor),
     Enum(EnumDescriptorProto),
 }
 
-pub enum MessageDescriptor {
-    Message(DescriptorProto)
+impl TypeDescriptor {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Message(d) => d.name(),
+            Self::Enum(d) => d.name(),
+        }
+    }
 }
 
-pub enum EnumDescriptor {
-    Oneof(OneofDescriptorProto),
-    Enum(EnumDescriptorProto),
+pub struct Attribute {
+    /// Context of this call.
+    pub attribute_of: AttributeOf,
+    /// The proto package name.
+    pub package: String,
+    /// Fully qualified message name.
+    pub fq_message_name: String,
+    /// Type that's being generated.
+    pub type_: TypeDescriptor,
+    /// Field (if applicable) that's being generated.
+    pub field: Option<(String, FieldDescriptor)>
 }
 
+#[derive(Clone)]
 pub enum FieldDescriptor {
     Field(FieldDescriptorProto),
     Oneof(OneofDescriptorProto),
@@ -46,13 +88,23 @@ pub enum FieldDescriptor {
 }
 
 pub trait ConfigCallbacks {
-    fn type_attribute(&self, fq_message_name: &str, desc: TypeDescriptor) -> impl Iterator<Item = &String>;
+    fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = &String>;
 
-    fn message_attribute(&self, fq_message_name: &str, desc: MessageDescriptor) -> impl Iterator<Item = &String>;
+    fn message_attribute(&self, package: String, fq_message_name: String, descriptor: MessageDescriptor) -> impl Iterator<Item = &String> {
+        self.attribute(Attribute { attribute_of: AttributeOf::Message, package, fq_message_name, type_: TypeDescriptor::Message(descriptor), field: None })
+    }
 
-    fn enum_attribute(&self, fq_message_name: &str, desc: EnumDescriptor) -> impl Iterator<Item = &String>;
+    fn type_attribute(&self, package: String, fq_message_name: String, descriptor: TypeDescriptor) -> impl Iterator<Item = &String> {
+        self.attribute(Attribute { attribute_of: AttributeOf::Type, package, fq_message_name, type_: descriptor, field: None })
+    }
 
-    fn field_attribute(&self, fq_message_name: &str, field_name: &str, desc: FieldDescriptor) -> impl Iterator<Item = &String>;
+    fn enum_attribute(&self, package: String, fq_message_name: String, descriptor: TypeDescriptor) -> impl Iterator<Item = &String> {
+        self.attribute(Attribute { attribute_of: AttributeOf::Enum, package, fq_message_name, type_: descriptor, field: None })
+    }
+
+    fn field_attribute(&self, package: String, fq_message_name: String, descriptor: TypeDescriptor, field_name: String, field: FieldDescriptor) -> impl Iterator<Item = &String> {
+        self.attribute(Attribute { attribute_of: AttributeOf::Field(field_name.clone()), package, fq_message_name, type_: descriptor, field: Some((field_name, field)) })
+    }
 }
 
 pub struct DefaultCallbacks {
@@ -63,20 +115,13 @@ pub struct DefaultCallbacks {
 }
 
 impl ConfigCallbacks for DefaultCallbacks {
-    fn type_attribute(&self, fq_message_name: &str, _desc: TypeDescriptor) -> impl Iterator<Item = &String> {
-        self.type_attributes.get(fq_message_name)
-    }
-
-    fn message_attribute(&self, fq_message_name: &str, _desc: MessageDescriptor) -> impl Iterator<Item = &String> {
-        self.message_attributes.get(fq_message_name)
-    }
-
-    fn enum_attribute(&self, fq_message_name: &str, _desc: EnumDescriptor) -> impl Iterator<Item = &String> {
-        self.enum_attributes.get(fq_message_name)
-    }
-
-    fn field_attribute(&self, fq_message_name: &str, field_name: &str, _desc: FieldDescriptor) -> impl Iterator<Item = &String> {
-        self.field_attributes.get_field(fq_message_name, field_name)
+    fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = &String> {
+        match attribute.attribute_of {
+            AttributeOf::Message => self.message_attributes.get(&attribute.fq_message_name),
+            AttributeOf::Type => self.type_attributes.get(&attribute.fq_message_name),
+            AttributeOf::Enum => self.enum_attributes.get(&attribute.fq_message_name),
+            AttributeOf::Field(field_name) => self.field_attributes.get_field(&attribute.fq_message_name, &field_name)
+        }
     }
 }
 

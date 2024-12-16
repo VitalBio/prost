@@ -154,8 +154,8 @@ mod path;
 
 mod config;
 pub use config::{
-    error_message_protoc_not_found, protoc_from_env, protoc_include_from_env, Config, ConfigT,
-    ConfigCallbacks, EnumDescriptor, FieldDescriptor, MessageDescriptor, TypeDescriptor,
+    error_message_protoc_not_found, protoc_from_env, protoc_include_from_env,
+    AttributeOf, Config, ConfigT, ConfigCallbacks, FieldDescriptor, MessageDescriptor, TypeDescriptor,
 };
 
 mod module;
