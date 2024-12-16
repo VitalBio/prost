@@ -18,7 +18,7 @@ use crate::ast::{Comments, Method, Service};
 use crate::extern_paths::ExternPaths;
 use crate::ident::{strip_enum_prefix, to_snake, to_upper_camel};
 use crate::message_graph::MessageGraph;
-use crate::Config;
+use crate::{Config, ConfigCallbacks};
 
 mod c_escaping;
 use c_escaping::unescape_c_escape_string;
@@ -26,8 +26,8 @@ use c_escaping::unescape_c_escape_string;
 mod syntax;
 use syntax::Syntax;
 
-pub struct CodeGenerator<'a> {
-    config: &'a mut Config,
+pub struct CodeGenerator<'a, C: ConfigCallbacks> {
+    config: &'a mut Config<C>,
     package: String,
     type_path: Vec<String>,
     source_info: Option<SourceCodeInfo>,
@@ -45,7 +45,7 @@ fn push_indent(buf: &mut String, depth: u8) {
     }
 }
 
-fn prost_path(config: &Config) -> &str {
+fn prost_path<C: ConfigCallbacks>(config: &Config<C>) -> &str {
     config.prost_path.as_deref().unwrap_or("::prost")
 }
 
@@ -87,9 +87,9 @@ impl OneofField {
     }
 }
 
-impl CodeGenerator<'_> {
+impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
     pub fn generate(
-        config: &mut Config,
+        config: &mut Config<C>,
         message_graph: &MessageGraph,
         extern_paths: &ExternPaths,
         file: FileDescriptorProto,
@@ -349,7 +349,7 @@ impl CodeGenerator<'_> {
 
     fn append_type_attributes(&mut self, fq_message_name: &str) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self.config.type_attributes.get(fq_message_name) {
+        for attribute in self.config.callbacks.type_attribute(fq_message_name) {
             push_indent(self.buf, self.depth);
             self.buf.push_str(attribute);
             self.buf.push('\n');
@@ -358,7 +358,7 @@ impl CodeGenerator<'_> {
 
     fn append_message_attributes(&mut self, fq_message_name: &str) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self.config.message_attributes.get(fq_message_name) {
+        for attribute in self.config.callbacks.message_attribute(fq_message_name) {
             push_indent(self.buf, self.depth);
             self.buf.push_str(attribute);
             self.buf.push('\n');
@@ -380,7 +380,7 @@ impl CodeGenerator<'_> {
 
     fn append_enum_attributes(&mut self, fq_message_name: &str) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self.config.enum_attributes.get(fq_message_name) {
+        for attribute in self.config.callbacks.enum_attribute(fq_message_name) {
             push_indent(self.buf, self.depth);
             self.buf.push_str(attribute);
             self.buf.push('\n');
@@ -391,8 +391,8 @@ impl CodeGenerator<'_> {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
         for attribute in self
             .config
-            .field_attributes
-            .get_field(fq_message_name, field_name)
+            .callbacks
+            .field_attribute(fq_message_name, field_name)
         {
             push_indent(self.buf, self.depth);
             self.buf.push_str(attribute);
