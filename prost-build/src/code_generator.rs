@@ -18,7 +18,7 @@ use crate::ast::{Comments, Method, Service};
 use crate::extern_paths::ExternPaths;
 use crate::ident::{strip_enum_prefix, to_snake, to_upper_camel};
 use crate::message_graph::MessageGraph;
-use crate::{Config, ConfigCallbacks};
+use crate::{Config, ConfigCallbacks, EnumDescriptor, FieldDescriptor, MessageDescriptor, TypeDescriptor};
 
 mod c_escaping;
 use c_escaping::unescape_c_escape_string;
@@ -160,6 +160,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
 
         let message_name = message.name().to_string();
         let fq_message_name = self.fq_name(&message_name);
+        let message_for_config = message.clone();
 
         // Skip external types.
         if self.extern_paths.resolve_ident(&fq_message_name).is_some() {
@@ -225,8 +226,8 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
             .collect();
 
         self.append_doc(&fq_message_name, None);
-        self.append_type_attributes(&fq_message_name);
-        self.append_message_attributes(&fq_message_name);
+        self.append_type_attributes(&fq_message_name, TypeDescriptor::Message(message_for_config.clone()));
+        self.append_message_attributes(&fq_message_name, MessageDescriptor::Message(message_for_config));
         self.push_indent();
         self.buf.push_str(&format!(
             "#[derive(Clone, {}PartialEq, {}::Message)]\n",
@@ -347,18 +348,18 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
         self.buf.push_str("}\n");
     }
 
-    fn append_type_attributes(&mut self, fq_message_name: &str) {
+    fn append_type_attributes(&mut self, fq_message_name: &str, desc: TypeDescriptor) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self.config.callbacks.type_attribute(fq_message_name) {
+        for attribute in self.config.callbacks.type_attribute(fq_message_name, desc) {
             push_indent(self.buf, self.depth);
             self.buf.push_str(attribute);
             self.buf.push('\n');
         }
     }
 
-    fn append_message_attributes(&mut self, fq_message_name: &str) {
+    fn append_message_attributes(&mut self, fq_message_name: &str, desc: MessageDescriptor) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self.config.callbacks.message_attribute(fq_message_name) {
+        for attribute in self.config.callbacks.message_attribute(fq_message_name, desc) {
             push_indent(self.buf, self.depth);
             self.buf.push_str(attribute);
             self.buf.push('\n');
@@ -378,21 +379,21 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
         }
     }
 
-    fn append_enum_attributes(&mut self, fq_message_name: &str) {
+    fn append_enum_attributes(&mut self, fq_message_name: &str, desc: EnumDescriptor) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self.config.callbacks.enum_attribute(fq_message_name) {
+        for attribute in self.config.callbacks.enum_attribute(fq_message_name, desc) {
             push_indent(self.buf, self.depth);
             self.buf.push_str(attribute);
             self.buf.push('\n');
         }
     }
 
-    fn append_field_attributes(&mut self, fq_message_name: &str, field_name: &str) {
+    fn append_field_attributes(&mut self, fq_message_name: &str, field_name: &str, desc: FieldDescriptor) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
         for attribute in self
             .config
             .callbacks
-            .field_attribute(fq_message_name, field_name)
+            .field_attribute(fq_message_name, field_name, desc)
         {
             push_indent(self.buf, self.depth);
             self.buf.push_str(attribute);
@@ -497,7 +498,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
         }
 
         self.buf.push_str("\")]\n");
-        self.append_field_attributes(fq_message_name, field.descriptor.name());
+        self.append_field_attributes(fq_message_name, field.descriptor.name(), FieldDescriptor::Field(field.descriptor.clone()));
         self.push_indent();
         self.buf.push_str("pub ");
         self.buf.push_str(&field.rust_name());
@@ -561,7 +562,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
             value_tag,
             field.descriptor.number()
         ));
-        self.append_field_attributes(fq_message_name, field.descriptor.name());
+        self.append_field_attributes(fq_message_name, field.descriptor.name(), FieldDescriptor::Field(field.descriptor.clone()));
         self.push_indent();
         self.buf.push_str(&format!(
             "pub {}: {}<{}, {}>,\n",
@@ -594,7 +595,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
                 .map(|field| field.descriptor.number())
                 .join(", "),
         ));
-        self.append_field_attributes(fq_message_name, oneof.descriptor.name());
+        self.append_field_attributes(fq_message_name, oneof.descriptor.name(), FieldDescriptor::Oneof(oneof.descriptor.clone()));
         self.push_indent();
         self.buf.push_str(&format!(
             "pub {}: ::core::option::Option<{}>,\n",
@@ -611,8 +612,8 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
         self.path.pop();
 
         let oneof_name = format!("{}.{}", fq_message_name, oneof.descriptor.name());
-        self.append_type_attributes(&oneof_name);
-        self.append_enum_attributes(&oneof_name);
+        self.append_type_attributes(&oneof_name, TypeDescriptor::Oneof(oneof.descriptor.clone()));
+        self.append_enum_attributes(&oneof_name, EnumDescriptor::Oneof(oneof.descriptor.clone()));
         self.push_indent();
 
         let can_oneof_derive_copy = oneof.fields.iter().all(|field| {
@@ -644,7 +645,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
                 ty_tag,
                 field.descriptor.number()
             ));
-            self.append_field_attributes(&oneof_name, field.descriptor.name());
+            self.append_field_attributes(&oneof_name, field.descriptor.name(), FieldDescriptor::Field(field.descriptor.clone()));
 
             self.push_indent();
             let ty = self.resolve_type(&field.descriptor, fq_message_name);
@@ -726,8 +727,8 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
         }
 
         self.append_doc(&fq_proto_enum_name, None);
-        self.append_type_attributes(&fq_proto_enum_name);
-        self.append_enum_attributes(&fq_proto_enum_name);
+        self.append_type_attributes(&fq_proto_enum_name, TypeDescriptor::Enum(desc.clone()));
+        self.append_enum_attributes(&fq_proto_enum_name, EnumDescriptor::Enum(desc.clone()));
         self.push_indent();
         let dbg = if self.should_skip_debug(&fq_proto_enum_name) {
             ""
@@ -755,7 +756,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
             self.path.push(variant.path_idx as i32);
 
             self.append_doc(&fq_proto_enum_name, Some(variant.proto_name));
-            self.append_field_attributes(&fq_proto_enum_name, variant.proto_name);
+            self.append_field_attributes(&fq_proto_enum_name, variant.proto_name, FieldDescriptor::EnumVariant);
             self.push_indent();
             self.buf.push_str(&variant.generated_variant_name);
             self.buf.push_str(" = ");
