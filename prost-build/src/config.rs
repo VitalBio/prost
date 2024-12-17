@@ -90,9 +90,9 @@ pub enum FieldDescriptor {
 }
 
 pub trait ConfigCallbacks {
-    fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = &String>;
+    fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = String>;
 
-    fn message_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: MessageDescriptor) -> impl Iterator<Item = &String>
+    fn message_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: MessageDescriptor) -> impl Iterator<Item = String>
     where
         P: AsRef<str>,
         A: AsRef<str>,
@@ -100,7 +100,7 @@ pub trait ConfigCallbacks {
         self.attribute(Attribute { attribute_of: AttributeOf::Message, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: TypeDescriptor::Message(descriptor), field: None })
     }
 
-    fn type_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor) -> impl Iterator<Item = &String>
+    fn type_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor) -> impl Iterator<Item = String>
     where
         P: AsRef<str>,
         A: AsRef<str>,
@@ -108,7 +108,7 @@ pub trait ConfigCallbacks {
         self.attribute(Attribute { attribute_of: AttributeOf::Type, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: descriptor, field: None })
     }
 
-    fn enum_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor) -> impl Iterator<Item = &String>
+    fn enum_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor) -> impl Iterator<Item = String>
     where
         P: AsRef<str>,
         A: AsRef<str>,
@@ -116,7 +116,7 @@ pub trait ConfigCallbacks {
         self.attribute(Attribute { attribute_of: AttributeOf::Enum, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: descriptor, field: None })
     }
 
-    fn field_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor, field_name: String, field: FieldDescriptor) -> impl Iterator<Item = &String>
+    fn field_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor, field_name: String, field: FieldDescriptor) -> impl Iterator<Item = String>
     where
         P: AsRef<str>,
         A: AsRef<str>,
@@ -144,13 +144,13 @@ impl DefaultCallbacks {
 }
 
 impl ConfigCallbacks for DefaultCallbacks {
-    fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = &String> {
-        match attribute.attribute_of {
+    fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = String> {
+        (match attribute.attribute_of {
             AttributeOf::Message => self.message_attributes.get(&attribute.fq_message_name),
             AttributeOf::Type => self.type_attributes.get(&attribute.fq_message_name),
             AttributeOf::Enum => self.enum_attributes.get(&attribute.fq_message_name),
             AttributeOf::Field => self.field_attributes.get_field(&attribute.fq_message_name, &attribute.field.map(|x| x.0.clone()).unwrap_or("".to_string()))
-        }
+        }).cloned()
     }
 }
 

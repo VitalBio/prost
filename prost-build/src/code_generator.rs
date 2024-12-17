@@ -353,7 +353,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
         for attribute in self.config.callbacks.type_attribute(package, fq_message_name.to_string(), descriptor) {
             push_indent(self.buf, self.depth);
-            self.buf.push_str(attribute);
+            self.buf.push_str(&attribute);
             self.buf.push('\n');
         }
     }
@@ -362,7 +362,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
         for attribute in self.config.callbacks.message_attribute(package, fq_message_name.to_string(), descriptor) {
             push_indent(self.buf, self.depth);
-            self.buf.push_str(attribute);
+            self.buf.push_str(&attribute);
             self.buf.push('\n');
         }
     }
@@ -384,7 +384,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
         for attribute in self.config.callbacks.enum_attribute(package, fq_message_name.to_string(), descriptor) {
             push_indent(self.buf, self.depth);
-            self.buf.push_str(attribute);
+            self.buf.push_str(&attribute);
             self.buf.push('\n');
         }
     }
@@ -397,7 +397,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
             .field_attribute(package, fq_message_name.to_string(), descriptor, field_name, field)
         {
             push_indent(self.buf, self.depth);
-            self.buf.push_str(attribute);
+            self.buf.push_str(&attribute);
             self.buf.push('\n');
         }
     }
