@@ -673,7 +673,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
                 ty_tag,
                 field.descriptor.number()
             ));
-            self.append_field_attributes(self.package.to_string(), &oneof_name, descriptor.clone(), field.descriptor.name().to_string(), FieldDescriptor::OneofVariant(field.descriptor.clone()));
+            self.append_field_attributes(self.package.to_string(), &oneof_name, descriptor.clone(), field.descriptor.name().to_string(), FieldDescriptor::Field(ty_tag.to_string(), field.descriptor.clone()));
 
             self.push_indent();
             let ty = self.resolve_type(&field.descriptor, fq_message_name);

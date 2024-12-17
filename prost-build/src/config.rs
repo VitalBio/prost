@@ -62,8 +62,6 @@ pub struct Attribute {
 pub enum FieldDescriptor {
     /// A message's field.
     Field(String, FieldDescriptorProto),
-    /// A oneof's variant.
-    OneofVariant(FieldDescriptorProto),
     /// A map's field.
     MapField(String, String, FieldDescriptorProto),
     /// A oneof field.
