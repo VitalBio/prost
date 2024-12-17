@@ -523,7 +523,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
         }
 
         self.buf.push_str("\")]\n");
-        self.append_field_attributes(self.package.clone(), fq_message_name, descriptor, field.descriptor.name().to_string(), FieldDescriptor::Field(field.descriptor.clone()));
+        self.append_field_attributes(self.package.clone(), fq_message_name, descriptor, field.descriptor.name().to_string(), FieldDescriptor::Field(type_tag.to_string(), field.descriptor.clone()));
         self.push_indent();
         self.buf.push_str("pub ");
         self.buf.push_str(&field.rust_name());
@@ -588,7 +588,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
             value_tag,
             field.descriptor.number()
         ));
-        self.append_field_attributes(self.package.clone(), fq_message_name, descriptor, field.descriptor.name().to_string(), FieldDescriptor::Field(field.descriptor.clone()));
+        self.append_field_attributes(self.package.clone(), fq_message_name, descriptor, field.descriptor.name().to_string(), FieldDescriptor::MapField(key_tag.to_string(), value_tag.to_string(), field.descriptor.clone()));
         self.push_indent();
         self.buf.push_str(&format!(
             "pub {}: {}<{}, {}>,\n",
@@ -673,7 +673,7 @@ impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
                 ty_tag,
                 field.descriptor.number()
             ));
-            self.append_field_attributes(self.package.to_string(), &oneof_name, descriptor.clone(), field.descriptor.name().to_string(), FieldDescriptor::Field(field.descriptor.clone()));
+            self.append_field_attributes(self.package.to_string(), &oneof_name, descriptor.clone(), field.descriptor.name().to_string(), FieldDescriptor::OneofVariant(field.descriptor.clone()));
 
             self.push_indent();
             let ty = self.resolve_type(&field.descriptor, fq_message_name);

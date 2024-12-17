@@ -60,8 +60,15 @@ pub struct Attribute {
 
 #[derive(Clone)]
 pub enum FieldDescriptor {
-    Field(FieldDescriptorProto),
+    /// A message's field.
+    Field(String, FieldDescriptorProto),
+    /// A oneof's variant.
+    OneofVariant(FieldDescriptorProto),
+    /// A map's field.
+    MapField(String, String, FieldDescriptorProto),
+    /// A oneof field.
     Oneof(OneofDescriptorProto),
+    /// An enum's variant.
     EnumVariant,
 }
 
