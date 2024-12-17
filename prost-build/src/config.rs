@@ -44,16 +44,6 @@ pub enum Descriptor {
     Enum(EnumDescriptorProto),
 }
 
-impl Descriptor {
-    pub fn name(&self) -> &str {
-        match self {
-            Self::Message(d) => d.name(),
-            Self::Oneof(_, o) => o.name(),
-            Self::Enum(e) => e.name(),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct Attribute {
     /// Context of this call.
@@ -94,6 +84,42 @@ impl DefaultCallbacks {
             enum_attributes: PathMap::default(),
             field_attributes: PathMap::default(),
         }
+    }
+
+    pub fn field_attribute<P, A>(&mut self, path: P, attribute: A)
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.field_attributes
+            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+    }
+
+    pub fn type_attribute<P, A>(&mut self, path: P, attribute: A)
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.type_attributes
+            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+    }
+
+    pub fn message_attribute<P, A>(&mut self, path: P, attribute: A)
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.message_attributes
+            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+    }
+
+    pub fn enum_attribute<P, A>(&mut self, path: P, attribute: A)
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.enum_attributes
+            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
     }
 }
 
@@ -172,8 +198,7 @@ impl Config {
         P: AsRef<str>,
         A: AsRef<str>,
     {
-        self.callbacks.field_attributes
-            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+        self.callbacks.field_attribute(path, attribute);
         self
     }
 
@@ -221,8 +246,7 @@ impl Config {
         P: AsRef<str>,
         A: AsRef<str>,
     {
-        self.callbacks.type_attributes
-            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+        self.callbacks.type_attribute(path, attribute);
         self
     }
 
@@ -260,8 +284,7 @@ impl Config {
         P: AsRef<str>,
         A: AsRef<str>,
     {
-        self.callbacks.message_attributes
-            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+        self.callbacks.message_attribute(path, attribute);
         self
     }
 
@@ -309,8 +332,7 @@ impl Config {
         P: AsRef<str>,
         A: AsRef<str>,
     {
-        self.callbacks.enum_attributes
-            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+        self.callbacks.enum_attribute(path, attribute);
         self
     }
 
