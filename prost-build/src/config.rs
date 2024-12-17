@@ -38,32 +38,18 @@ pub enum AttributeOf {
 }
 
 #[derive(Clone)]
-pub enum MessageDescriptor {
+pub enum Descriptor {
     Message(DescriptorProto),
-    Oneof(OneofDescriptorProto),
-}
-
-impl MessageDescriptor {
-    pub fn name(&self) -> &str {
-        match self {
-            Self::Message(d) => d.name(),
-            // let oneof_name = format!("{}.{}", fq_message_name, oneof.descriptor.name());
-            Self::Oneof(d) => d.name(),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum TypeDescriptor {
-    Message(MessageDescriptor),
+    Oneof(DescriptorProto, OneofDescriptorProto),
     Enum(EnumDescriptorProto),
 }
 
-impl TypeDescriptor {
+impl Descriptor {
     pub fn name(&self) -> &str {
         match self {
             Self::Message(d) => d.name(),
-            Self::Enum(d) => d.name(),
+            Self::Oneof(_, o) => o.name(),
+            Self::Enum(e) => e.name(),
         }
     }
 }
@@ -77,7 +63,7 @@ pub struct Attribute {
     /// Fully qualified message name.
     pub fq_message_name: String,
     /// Type that's being generated.
-    pub type_: TypeDescriptor,
+    pub descriptor: Descriptor,
     /// Field (if applicable) that's being generated.
     pub field: Option<(String, FieldDescriptor)>
 }
@@ -91,38 +77,6 @@ pub enum FieldDescriptor {
 
 pub trait ConfigCallbacks {
     fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = String>;
-
-    fn message_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: MessageDescriptor) -> impl Iterator<Item = String>
-    where
-        P: AsRef<str>,
-        A: AsRef<str>,
-    {
-        self.attribute(Attribute { attribute_of: AttributeOf::Message, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: TypeDescriptor::Message(descriptor), field: None })
-    }
-
-    fn type_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor) -> impl Iterator<Item = String>
-    where
-        P: AsRef<str>,
-        A: AsRef<str>,
-    {
-        self.attribute(Attribute { attribute_of: AttributeOf::Type, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: descriptor, field: None })
-    }
-
-    fn enum_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor) -> impl Iterator<Item = String>
-    where
-        P: AsRef<str>,
-        A: AsRef<str>,
-    {
-        self.attribute(Attribute { attribute_of: AttributeOf::Enum, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: descriptor, field: None })
-    }
-
-    fn field_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor, field_name: String, field: FieldDescriptor) -> impl Iterator<Item = String>
-    where
-        P: AsRef<str>,
-        A: AsRef<str>,
-    {
-        self.attribute(Attribute { attribute_of: AttributeOf::Field, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: descriptor, field: Some((field_name, field)) })
-    }
 }
 
 pub struct DefaultCallbacks {
