@@ -92,20 +92,36 @@ pub enum FieldDescriptor {
 pub trait ConfigCallbacks {
     fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = &String>;
 
-    fn message_attribute(&self, package: String, fq_message_name: String, descriptor: MessageDescriptor) -> impl Iterator<Item = &String> {
-        self.attribute(Attribute { attribute_of: AttributeOf::Message, package, fq_message_name, type_: TypeDescriptor::Message(descriptor), field: None })
+    fn message_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: MessageDescriptor) -> impl Iterator<Item = &String>
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.attribute(Attribute { attribute_of: AttributeOf::Message, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: TypeDescriptor::Message(descriptor), field: None })
     }
 
-    fn type_attribute(&self, package: String, fq_message_name: String, descriptor: TypeDescriptor) -> impl Iterator<Item = &String> {
-        self.attribute(Attribute { attribute_of: AttributeOf::Type, package, fq_message_name, type_: descriptor, field: None })
+    fn type_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor) -> impl Iterator<Item = &String>
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.attribute(Attribute { attribute_of: AttributeOf::Type, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: descriptor, field: None })
     }
 
-    fn enum_attribute(&self, package: String, fq_message_name: String, descriptor: TypeDescriptor) -> impl Iterator<Item = &String> {
-        self.attribute(Attribute { attribute_of: AttributeOf::Enum, package, fq_message_name, type_: descriptor, field: None })
+    fn enum_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor) -> impl Iterator<Item = &String>
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.attribute(Attribute { attribute_of: AttributeOf::Enum, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: descriptor, field: None })
     }
 
-    fn field_attribute(&self, package: String, fq_message_name: String, descriptor: TypeDescriptor, field_name: String, field: FieldDescriptor) -> impl Iterator<Item = &String> {
-        self.attribute(Attribute { attribute_of: AttributeOf::Field, package, fq_message_name, type_: descriptor, field: Some((field_name, field)) })
+    fn field_attribute<P, A>(&self, package: P, fq_message_name: A, descriptor: TypeDescriptor, field_name: String, field: FieldDescriptor) -> impl Iterator<Item = &String>
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.attribute(Attribute { attribute_of: AttributeOf::Field, package: package.as_ref().to_string(), fq_message_name: fq_message_name.as_ref().to_string(), type_: descriptor, field: Some((field_name, field)) })
     }
 }
 
