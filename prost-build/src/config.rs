@@ -179,7 +179,7 @@ pub struct ConfigT<C: ConfigCallbacks> {
     pub(crate) prost_path: Option<String>,
     #[cfg(feature = "format")]
     pub(crate) fmt: bool,
-    pub(crate) callbacks: C,
+    pub callbacks: C,
 }
 
 pub type Config = ConfigT<DefaultCallbacks>;
