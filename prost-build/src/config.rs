@@ -7,12 +7,13 @@ use std::fs;
 use std::io::{Error, ErrorKind, Result, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::iter::Iterator;
 
 use log::debug;
 use log::trace;
 
 use prost::Message;
-use prost_types::{FileDescriptorProto, FileDescriptorSet};
+use prost_types::{DescriptorProto, EnumDescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet, OneofDescriptorProto};
 
 use crate::code_generator::CodeGenerator;
 use crate::extern_paths::ExternPaths;
@@ -23,18 +24,129 @@ use crate::MapType;
 use crate::Module;
 use crate::ServiceGenerator;
 
-/// Configuration options for Protobuf code generation.
-///
-/// This configuration builder can be used to set non-default code generation options.
-pub struct Config {
-    pub(crate) file_descriptor_set_path: Option<PathBuf>,
-    pub(crate) service_generator: Option<Box<dyn ServiceGenerator>>,
-    pub(crate) map_type: PathMap<MapType>,
-    pub(crate) bytes_type: PathMap<BytesType>,
+#[derive(Clone)]
+/// Denotes point where the method was invoked in the code generator.
+pub enum AttributeOf {
+    /// `type_attribute`.
+    Type,
+    /// `message_attribute`.
+    Message,
+    /// `enum_attribute`.
+    Enum,
+    /// `field_attribute`.
+    Field,
+}
+
+#[derive(Clone)]
+pub enum Descriptor {
+    Message(DescriptorProto),
+    Oneof(DescriptorProto, OneofDescriptorProto),
+    Enum(EnumDescriptorProto),
+}
+
+#[derive(Clone)]
+pub struct Attribute {
+    /// Context of this call.
+    pub attribute_of: AttributeOf,
+    /// The proto package name.
+    pub package: String,
+    /// Fully qualified message name.
+    pub fq_message_name: String,
+    /// Type that's being generated.
+    pub descriptor: Descriptor,
+    /// Field (if applicable) that's being generated.
+    pub field: Option<(String, FieldDescriptor)>
+}
+
+#[derive(Clone)]
+pub enum FieldDescriptor {
+    /// A message's field.
+    Field(String, FieldDescriptorProto),
+    /// A map's field.
+    MapField(String, String, FieldDescriptorProto),
+    /// A oneof field.
+    Oneof(OneofDescriptorProto),
+    /// An enum's variant.
+    EnumVariant,
+}
+
+pub trait ConfigCallbacks {
+    fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = String>;
+}
+
+pub struct DefaultCallbacks {
     pub(crate) type_attributes: PathMap<String>,
     pub(crate) message_attributes: PathMap<String>,
     pub(crate) enum_attributes: PathMap<String>,
     pub(crate) field_attributes: PathMap<String>,
+}
+
+impl DefaultCallbacks {
+    pub fn new() -> Self {
+        Self {
+            type_attributes: PathMap::default(),
+            message_attributes: PathMap::default(),
+            enum_attributes: PathMap::default(),
+            field_attributes: PathMap::default(),
+        }
+    }
+
+    pub fn field_attribute<P, A>(&mut self, path: P, attribute: A)
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.field_attributes
+            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+    }
+
+    pub fn type_attribute<P, A>(&mut self, path: P, attribute: A)
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.type_attributes
+            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+    }
+
+    pub fn message_attribute<P, A>(&mut self, path: P, attribute: A)
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.message_attributes
+            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+    }
+
+    pub fn enum_attribute<P, A>(&mut self, path: P, attribute: A)
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.enum_attributes
+            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
+    }
+}
+
+impl ConfigCallbacks for DefaultCallbacks {
+    fn attribute(&self, attribute: Attribute) -> impl Iterator<Item = String> {
+        (match attribute.attribute_of {
+            AttributeOf::Message => self.message_attributes.get(&attribute.fq_message_name),
+            AttributeOf::Type => self.type_attributes.get(&attribute.fq_message_name),
+            AttributeOf::Enum => self.enum_attributes.get(&attribute.fq_message_name),
+            AttributeOf::Field => self.field_attributes.get_field(&attribute.fq_message_name, &attribute.field.map(|x| x.0.clone()).unwrap_or("".to_string()))
+        }).cloned()
+    }
+}
+
+/// Configuration options for Protobuf code generation.
+///
+/// This configuration builder can be used to set non-default code generation options.
+pub struct ConfigT<C: ConfigCallbacks> {
+    pub(crate) file_descriptor_set_path: Option<PathBuf>,
+    pub(crate) service_generator: Option<Box<dyn ServiceGenerator>>,
+    pub(crate) map_type: PathMap<MapType>,
+    pub(crate) bytes_type: PathMap<BytesType>,
     pub(crate) boxed: PathMap<()>,
     pub(crate) prost_types: bool,
     pub(crate) strip_enum_prefix: bool,
@@ -52,12 +164,210 @@ pub struct Config {
     pub(crate) prost_path: Option<String>,
     #[cfg(feature = "format")]
     pub(crate) fmt: bool,
+    pub callbacks: C,
 }
+
+pub type Config = ConfigT<DefaultCallbacks>;
 
 impl Config {
     /// Creates a new code generator configuration with default options.
-    pub fn new() -> Config {
+    pub fn new() -> Self {
         Config::default()
+    }
+
+    /// Add additional attribute to matched fields.
+    ///
+    /// # Arguments
+    ///
+    /// **`path`** - a path matching any number of fields. These fields get the attribute.
+    /// For details about matching fields see [`btree_map`](#method.btree_map).
+    ///
+    /// **`attribute`** - an arbitrary string that'll be placed before each matched field. The
+    /// expected usage are additional attributes, usually in concert with whole-type
+    /// attributes set with [`type_attribute`](method.type_attribute), but it is not
+    /// checked and anything can be put there.
+    ///
+    /// Note that the calls to this method are cumulative ‒ if multiple paths from multiple calls
+    /// match the same field, the field gets all the corresponding attributes.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # let mut config = prost_build::Config::new();
+    /// // Prost renames fields named `in` to `in_`. But if serialized through serde,
+    /// // they should as `in`.
+    /// config.field_attribute("in", "#[serde(rename = \"in\")]");
+    /// ```
+    pub fn field_attribute<P, A>(&mut self, path: P, attribute: A) -> &mut Self
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.callbacks.field_attribute(path, attribute);
+        self
+    }
+
+    /// Add additional attribute to matched messages, enums and one-ofs.
+    ///
+    /// # Arguments
+    ///
+    /// **`paths`** - a path matching any number of types. It works the same way as in
+    /// [`btree_map`](#method.btree_map), just with the field name omitted.
+    ///
+    /// **`attribute`** - an arbitrary string to be placed before each matched type. The
+    /// expected usage are additional attributes, but anything is allowed.
+    ///
+    /// The calls to this method are cumulative. They don't overwrite previous calls and if a
+    /// type is matched by multiple calls of the method, all relevant attributes are added to
+    /// it.
+    ///
+    /// For things like serde it might be needed to combine with [field
+    /// attributes](#method.field_attribute).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # let mut config = prost_build::Config::new();
+    /// // Nothing around uses floats, so we can derive real `Eq` in addition to `PartialEq`.
+    /// config.type_attribute(".", "#[derive(Eq)]");
+    /// // Some messages want to be serializable with serde as well.
+    /// config.type_attribute("my_messages.MyMessageType",
+    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
+    /// config.type_attribute("my_messages.MyMessageType.MyNestedMessageType",
+    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
+    /// ```
+    ///
+    /// # Oneof fields
+    ///
+    /// The `oneof` fields don't have a type name of their own inside Protobuf. Therefore, the
+    /// field name can be used both with `type_attribute` and `field_attribute` ‒ the first is
+    /// placed before the `enum` type definition, the other before the field inside corresponding
+    /// message `struct`.
+    ///
+    /// In other words, to place an attribute on the `enum` implementing the `oneof`, the match
+    /// would look like `my_messages.MyMessageType.oneofname`.
+    pub fn type_attribute<P, A>(&mut self, path: P, attribute: A) -> &mut Self
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.callbacks.type_attribute(path, attribute);
+        self
+    }
+
+    /// Add additional attribute to matched messages.
+    ///
+    /// # Arguments
+    ///
+    /// **`paths`** - a path matching any number of types. It works the same way as in
+    /// [`btree_map`](#method.btree_map), just with the field name omitted.
+    ///
+    /// **`attribute`** - an arbitrary string to be placed before each matched type. The
+    /// expected usage are additional attributes, but anything is allowed.
+    ///
+    /// The calls to this method are cumulative. They don't overwrite previous calls and if a
+    /// type is matched by multiple calls of the method, all relevant attributes are added to
+    /// it.
+    ///
+    /// For things like serde it might be needed to combine with [field
+    /// attributes](#method.field_attribute).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # let mut config = prost_build::Config::new();
+    /// // Nothing around uses floats, so we can derive real `Eq` in addition to `PartialEq`.
+    /// config.message_attribute(".", "#[derive(Eq)]");
+    /// // Some messages want to be serializable with serde as well.
+    /// config.message_attribute("my_messages.MyMessageType",
+    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
+    /// config.message_attribute("my_messages.MyMessageType.MyNestedMessageType",
+    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
+    /// ```
+    pub fn message_attribute<P, A>(&mut self, path: P, attribute: A) -> &mut Self
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.callbacks.message_attribute(path, attribute);
+        self
+    }
+
+    /// Add additional attribute to matched enums and one-ofs.
+    ///
+    /// # Arguments
+    ///
+    /// **`paths`** - a path matching any number of types. It works the same way as in
+    /// [`btree_map`](#method.btree_map), just with the field name omitted.
+    ///
+    /// **`attribute`** - an arbitrary string to be placed before each matched type. The
+    /// expected usage are additional attributes, but anything is allowed.
+    ///
+    /// The calls to this method are cumulative. They don't overwrite previous calls and if a
+    /// type is matched by multiple calls of the method, all relevant attributes are added to
+    /// it.
+    ///
+    /// For things like serde it might be needed to combine with [field
+    /// attributes](#method.field_attribute).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # let mut config = prost_build::Config::new();
+    /// // Nothing around uses floats, so we can derive real `Eq` in addition to `PartialEq`.
+    /// config.enum_attribute(".", "#[derive(Eq)]");
+    /// // Some messages want to be serializable with serde as well.
+    /// config.enum_attribute("my_messages.MyEnumType",
+    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
+    /// config.enum_attribute("my_messages.MyMessageType.MyNestedEnumType",
+    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
+    /// ```
+    ///
+    /// # Oneof fields
+    ///
+    /// The `oneof` fields don't have a type name of their own inside Protobuf. Therefore, the
+    /// field name can be used both with `enum_attribute` and `field_attribute` ‒ the first is
+    /// placed before the `enum` type definition, the other before the field inside corresponding
+    /// message `struct`.
+    ///
+    /// In other words, to place an attribute on the `enum` implementing the `oneof`, the match
+    /// would look like `my_messages.MyNestedMessageType.oneofname`.
+    pub fn enum_attribute<P, A>(&mut self, path: P, attribute: A) -> &mut Self
+    where
+        P: AsRef<str>,
+        A: AsRef<str>,
+    {
+        self.callbacks.enum_attribute(path, attribute);
+        self
+    }
+
+}
+
+impl<C: ConfigCallbacks> ConfigT<C> {
+    pub fn callback<D: ConfigCallbacks>(self, callbacks: D) -> ConfigT<D> {
+        ConfigT {
+            file_descriptor_set_path: self.file_descriptor_set_path,
+            service_generator: self.service_generator,
+            map_type: self.map_type,
+            bytes_type: self.bytes_type,
+            boxed: self.boxed,
+            prost_types: self.prost_types,
+            strip_enum_prefix: self.strip_enum_prefix,
+            out_dir: self.out_dir,
+            extern_paths: self.extern_paths,
+            default_package_filename: self.default_package_filename,
+            enable_type_names: self.enable_type_names,
+            type_name_domains: self.type_name_domains,
+            protoc_args: self.protoc_args,
+            protoc_executable: self.protoc_executable,
+            disable_comments: self.disable_comments,
+            skip_debug: self.skip_debug,
+            skip_protoc_run: self.skip_protoc_run,
+            include_file: self.include_file,
+            prost_path: self.prost_path,
+            fmt: self.fmt,
+            callbacks,
+        }
     }
 
     /// Configure the code generator to generate Rust [`BTreeMap`][1] fields for Protobuf
@@ -178,176 +488,6 @@ impl Config {
             self.bytes_type
                 .insert(matcher.as_ref().to_string(), BytesType::Bytes);
         }
-        self
-    }
-
-    /// Add additional attribute to matched fields.
-    ///
-    /// # Arguments
-    ///
-    /// **`path`** - a path matching any number of fields. These fields get the attribute.
-    /// For details about matching fields see [`btree_map`](#method.btree_map).
-    ///
-    /// **`attribute`** - an arbitrary string that'll be placed before each matched field. The
-    /// expected usage are additional attributes, usually in concert with whole-type
-    /// attributes set with [`type_attribute`](method.type_attribute), but it is not
-    /// checked and anything can be put there.
-    ///
-    /// Note that the calls to this method are cumulative ‒ if multiple paths from multiple calls
-    /// match the same field, the field gets all the corresponding attributes.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # let mut config = prost_build::Config::new();
-    /// // Prost renames fields named `in` to `in_`. But if serialized through serde,
-    /// // they should as `in`.
-    /// config.field_attribute("in", "#[serde(rename = \"in\")]");
-    /// ```
-    pub fn field_attribute<P, A>(&mut self, path: P, attribute: A) -> &mut Self
-    where
-        P: AsRef<str>,
-        A: AsRef<str>,
-    {
-        self.field_attributes
-            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
-        self
-    }
-
-    /// Add additional attribute to matched messages, enums and one-ofs.
-    ///
-    /// # Arguments
-    ///
-    /// **`paths`** - a path matching any number of types. It works the same way as in
-    /// [`btree_map`](#method.btree_map), just with the field name omitted.
-    ///
-    /// **`attribute`** - an arbitrary string to be placed before each matched type. The
-    /// expected usage are additional attributes, but anything is allowed.
-    ///
-    /// The calls to this method are cumulative. They don't overwrite previous calls and if a
-    /// type is matched by multiple calls of the method, all relevant attributes are added to
-    /// it.
-    ///
-    /// For things like serde it might be needed to combine with [field
-    /// attributes](#method.field_attribute).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # let mut config = prost_build::Config::new();
-    /// // Nothing around uses floats, so we can derive real `Eq` in addition to `PartialEq`.
-    /// config.type_attribute(".", "#[derive(Eq)]");
-    /// // Some messages want to be serializable with serde as well.
-    /// config.type_attribute("my_messages.MyMessageType",
-    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
-    /// config.type_attribute("my_messages.MyMessageType.MyNestedMessageType",
-    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
-    /// ```
-    ///
-    /// # Oneof fields
-    ///
-    /// The `oneof` fields don't have a type name of their own inside Protobuf. Therefore, the
-    /// field name can be used both with `type_attribute` and `field_attribute` ‒ the first is
-    /// placed before the `enum` type definition, the other before the field inside corresponding
-    /// message `struct`.
-    ///
-    /// In other words, to place an attribute on the `enum` implementing the `oneof`, the match
-    /// would look like `my_messages.MyMessageType.oneofname`.
-    pub fn type_attribute<P, A>(&mut self, path: P, attribute: A) -> &mut Self
-    where
-        P: AsRef<str>,
-        A: AsRef<str>,
-    {
-        self.type_attributes
-            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
-        self
-    }
-
-    /// Add additional attribute to matched messages.
-    ///
-    /// # Arguments
-    ///
-    /// **`paths`** - a path matching any number of types. It works the same way as in
-    /// [`btree_map`](#method.btree_map), just with the field name omitted.
-    ///
-    /// **`attribute`** - an arbitrary string to be placed before each matched type. The
-    /// expected usage are additional attributes, but anything is allowed.
-    ///
-    /// The calls to this method are cumulative. They don't overwrite previous calls and if a
-    /// type is matched by multiple calls of the method, all relevant attributes are added to
-    /// it.
-    ///
-    /// For things like serde it might be needed to combine with [field
-    /// attributes](#method.field_attribute).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # let mut config = prost_build::Config::new();
-    /// // Nothing around uses floats, so we can derive real `Eq` in addition to `PartialEq`.
-    /// config.message_attribute(".", "#[derive(Eq)]");
-    /// // Some messages want to be serializable with serde as well.
-    /// config.message_attribute("my_messages.MyMessageType",
-    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
-    /// config.message_attribute("my_messages.MyMessageType.MyNestedMessageType",
-    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
-    /// ```
-    pub fn message_attribute<P, A>(&mut self, path: P, attribute: A) -> &mut Self
-    where
-        P: AsRef<str>,
-        A: AsRef<str>,
-    {
-        self.message_attributes
-            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
-        self
-    }
-
-    /// Add additional attribute to matched enums and one-ofs.
-    ///
-    /// # Arguments
-    ///
-    /// **`paths`** - a path matching any number of types. It works the same way as in
-    /// [`btree_map`](#method.btree_map), just with the field name omitted.
-    ///
-    /// **`attribute`** - an arbitrary string to be placed before each matched type. The
-    /// expected usage are additional attributes, but anything is allowed.
-    ///
-    /// The calls to this method are cumulative. They don't overwrite previous calls and if a
-    /// type is matched by multiple calls of the method, all relevant attributes are added to
-    /// it.
-    ///
-    /// For things like serde it might be needed to combine with [field
-    /// attributes](#method.field_attribute).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # let mut config = prost_build::Config::new();
-    /// // Nothing around uses floats, so we can derive real `Eq` in addition to `PartialEq`.
-    /// config.enum_attribute(".", "#[derive(Eq)]");
-    /// // Some messages want to be serializable with serde as well.
-    /// config.enum_attribute("my_messages.MyEnumType",
-    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
-    /// config.enum_attribute("my_messages.MyMessageType.MyNestedEnumType",
-    ///                       "#[derive(Serialize)] #[serde(rename_all = \"snake_case\")]");
-    /// ```
-    ///
-    /// # Oneof fields
-    ///
-    /// The `oneof` fields don't have a type name of their own inside Protobuf. Therefore, the
-    /// field name can be used both with `enum_attribute` and `field_attribute` ‒ the first is
-    /// placed before the `enum` type definition, the other before the field inside corresponding
-    /// message `struct`.
-    ///
-    /// In other words, to place an attribute on the `enum` implementing the `oneof`, the match
-    /// would look like `my_messages.MyNestedMessageType.oneofname`.
-    pub fn enum_attribute<P, A>(&mut self, path: P, attribute: A) -> &mut Self
-    where
-        P: AsRef<str>,
-        A: AsRef<str>,
-    {
-        self.enum_attributes
-            .insert(path.as_ref().to_string(), attribute.as_ref().to_string());
         self
     }
 
@@ -1147,16 +1287,12 @@ fn write_file_if_changed(path: &Path, content: &[u8]) -> std::io::Result<()> {
 }
 
 impl default::Default for Config {
-    fn default() -> Config {
-        Config {
+    fn default() -> Self {
+        Self {
             file_descriptor_set_path: None,
             service_generator: None,
             map_type: PathMap::default(),
             bytes_type: PathMap::default(),
-            type_attributes: PathMap::default(),
-            message_attributes: PathMap::default(),
-            enum_attributes: PathMap::default(),
-            field_attributes: PathMap::default(),
             boxed: PathMap::default(),
             prost_types: true,
             strip_enum_prefix: true,
@@ -1174,19 +1310,18 @@ impl default::Default for Config {
             prost_path: None,
             #[cfg(feature = "format")]
             fmt: true,
+            callbacks: DefaultCallbacks::new(),
         }
     }
 }
 
-impl fmt::Debug for Config {
+impl<C: ConfigCallbacks + fmt::Debug> fmt::Debug for ConfigT<C> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("Config")
             .field("file_descriptor_set_path", &self.file_descriptor_set_path)
             .field("service_generator", &self.service_generator.is_some())
             .field("map_type", &self.map_type)
             .field("bytes_type", &self.bytes_type)
-            .field("type_attributes", &self.type_attributes)
-            .field("field_attributes", &self.field_attributes)
             .field("prost_types", &self.prost_types)
             .field("strip_enum_prefix", &self.strip_enum_prefix)
             .field("out_dir", &self.out_dir)
@@ -1198,6 +1333,7 @@ impl fmt::Debug for Config {
             .field("disable_comments", &self.disable_comments)
             .field("skip_debug", &self.skip_debug)
             .field("prost_path", &self.prost_path)
+            .field("callbacks", &self.callbacks)
             .finish()
     }
 }

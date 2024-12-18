@@ -18,7 +18,7 @@ use crate::ast::{Comments, Method, Service};
 use crate::extern_paths::ExternPaths;
 use crate::ident::{strip_enum_prefix, to_snake, to_upper_camel};
 use crate::message_graph::MessageGraph;
-use crate::Config;
+use crate::{Attribute, AttributeOf, ConfigCallbacks, ConfigT, Descriptor, FieldDescriptor};
 
 mod c_escaping;
 use c_escaping::unescape_c_escape_string;
@@ -26,8 +26,8 @@ use c_escaping::unescape_c_escape_string;
 mod syntax;
 use syntax::Syntax;
 
-pub struct CodeGenerator<'a> {
-    config: &'a mut Config,
+pub struct CodeGenerator<'a, C: ConfigCallbacks> {
+    config: &'a mut ConfigT<C>,
     package: String,
     type_path: Vec<String>,
     source_info: Option<SourceCodeInfo>,
@@ -45,7 +45,7 @@ fn push_indent(buf: &mut String, depth: u8) {
     }
 }
 
-fn prost_path(config: &Config) -> &str {
+fn prost_path<C: ConfigCallbacks>(config: &ConfigT<C>) -> &str {
     config.prost_path.as_deref().unwrap_or("::prost")
 }
 
@@ -87,9 +87,9 @@ impl OneofField {
     }
 }
 
-impl CodeGenerator<'_> {
+impl<C: ConfigCallbacks> CodeGenerator<'_, C> {
     pub fn generate(
-        config: &mut Config,
+        config: &mut ConfigT<C>,
         message_graph: &MessageGraph,
         extern_paths: &ExternPaths,
         file: FileDescriptorProto,
@@ -160,6 +160,8 @@ impl CodeGenerator<'_> {
 
         let message_name = message.name().to_string();
         let fq_message_name = self.fq_name(&message_name);
+        let descriptor_proto = message.clone();
+        let descriptor = Descriptor::Message(descriptor_proto.clone());
 
         // Skip external types.
         if self.extern_paths.resolve_ident(&fq_message_name).is_some() {
@@ -225,8 +227,8 @@ impl CodeGenerator<'_> {
             .collect();
 
         self.append_doc(&fq_message_name, None);
-        self.append_type_attributes(&fq_message_name);
-        self.append_message_attributes(&fq_message_name);
+        self.append_type_attributes(self.package.clone(), &fq_message_name, descriptor.clone());
+        self.append_message_attributes(self.package.clone(), &fq_message_name, descriptor.clone());
         self.push_indent();
         self.buf.push_str(&format!(
             "#[derive(Clone, {}PartialEq, {}::Message)]\n",
@@ -253,8 +255,8 @@ impl CodeGenerator<'_> {
                 .as_ref()
                 .and_then(|type_name| map_types.get(type_name))
             {
-                Some((key, value)) => self.append_map_field(&fq_message_name, field, key, value),
-                None => self.append_field(&fq_message_name, field),
+                Some((key, value)) => self.append_map_field(&fq_message_name, descriptor.clone(), field, key, value),
+                None => self.append_field(&fq_message_name, descriptor.clone(), field),
             }
             self.path.pop();
         }
@@ -263,7 +265,7 @@ impl CodeGenerator<'_> {
         self.path.push(8);
         for oneof in &oneof_fields {
             self.path.push(oneof.path_index);
-            self.append_oneof_field(&message_name, &fq_message_name, oneof);
+            self.append_oneof_field(&message_name, &fq_message_name, Descriptor::Oneof(descriptor_proto.clone(), oneof.descriptor.clone()), oneof);
             self.path.pop();
         }
         self.path.pop();
@@ -291,7 +293,7 @@ impl CodeGenerator<'_> {
             self.path.pop();
 
             for oneof in &oneof_fields {
-                self.append_oneof(&fq_message_name, oneof);
+                self.append_oneof(&fq_message_name, descriptor_proto.clone(), oneof);
             }
 
             self.pop_mod();
@@ -347,20 +349,34 @@ impl CodeGenerator<'_> {
         self.buf.push_str("}\n");
     }
 
-    fn append_type_attributes(&mut self, fq_message_name: &str) {
+    fn append_type_attributes(&mut self, package: String, fq_message_name: &str, descriptor: Descriptor) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self.config.type_attributes.get(fq_message_name) {
+        let attribute = Attribute {
+            attribute_of: AttributeOf::Type,
+            package,
+            fq_message_name: fq_message_name.to_string(),
+            descriptor,
+            field: None,
+        };
+        for attribute in self.config.callbacks.attribute(attribute) {
             push_indent(self.buf, self.depth);
-            self.buf.push_str(attribute);
+            self.buf.push_str(&attribute);
             self.buf.push('\n');
         }
     }
 
-    fn append_message_attributes(&mut self, fq_message_name: &str) {
+    fn append_message_attributes(&mut self, package: String, fq_message_name: &str, descriptor: Descriptor) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self.config.message_attributes.get(fq_message_name) {
+        let attribute = Attribute {
+            attribute_of: AttributeOf::Message,
+            package,
+            fq_message_name: fq_message_name.to_string(),
+            descriptor,
+            field: None,
+        };
+        for attribute in self.config.callbacks.attribute(attribute) {
             push_indent(self.buf, self.depth);
-            self.buf.push_str(attribute);
+            self.buf.push_str(&attribute);
             self.buf.push('\n');
         }
     }
@@ -378,29 +394,39 @@ impl CodeGenerator<'_> {
         }
     }
 
-    fn append_enum_attributes(&mut self, fq_message_name: &str) {
+    fn append_enum_attributes(&mut self, package: String, fq_message_name: &str, descriptor: Descriptor) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self.config.enum_attributes.get(fq_message_name) {
+        let attribute = Attribute {
+            attribute_of: AttributeOf::Enum,
+            package,
+            fq_message_name: fq_message_name.to_string(),
+            descriptor,
+            field: None,
+        };
+        for attribute in self.config.callbacks.attribute(attribute) {
             push_indent(self.buf, self.depth);
-            self.buf.push_str(attribute);
+            self.buf.push_str(&attribute);
             self.buf.push('\n');
         }
     }
 
-    fn append_field_attributes(&mut self, fq_message_name: &str, field_name: &str) {
+    fn append_field_attributes(&mut self, package: String, fq_message_name: &str, descriptor: Descriptor, field_name: String, field: FieldDescriptor) {
         assert_eq!(b'.', fq_message_name.as_bytes()[0]);
-        for attribute in self
-            .config
-            .field_attributes
-            .get_field(fq_message_name, field_name)
-        {
+        let attribute = Attribute {
+            attribute_of: AttributeOf::Field,
+            package,
+            fq_message_name: fq_message_name.to_string(),
+            descriptor,
+            field: Some((field_name, field))
+        };
+        for attribute in self.config.callbacks.attribute(attribute) {
             push_indent(self.buf, self.depth);
-            self.buf.push_str(attribute);
+            self.buf.push_str(&attribute);
             self.buf.push('\n');
         }
     }
 
-    fn append_field(&mut self, fq_message_name: &str, field: &Field) {
+    fn append_field(&mut self, fq_message_name: &str, descriptor: Descriptor, field: &Field) {
         let type_ = field.descriptor.r#type();
         let repeated = field.descriptor.label == Some(Label::Repeated as i32);
         let deprecated = self.deprecated(&field.descriptor);
@@ -497,7 +523,7 @@ impl CodeGenerator<'_> {
         }
 
         self.buf.push_str("\")]\n");
-        self.append_field_attributes(fq_message_name, field.descriptor.name());
+        self.append_field_attributes(self.package.clone(), fq_message_name, descriptor, field.descriptor.name().to_string(), FieldDescriptor::Field(type_tag.to_string(), field.descriptor.clone()));
         self.push_indent();
         self.buf.push_str("pub ");
         self.buf.push_str(&field.rust_name());
@@ -528,6 +554,7 @@ impl CodeGenerator<'_> {
     fn append_map_field(
         &mut self,
         fq_message_name: &str,
+        descriptor: Descriptor,
         field: &Field,
         key: &FieldDescriptorProto,
         value: &FieldDescriptorProto,
@@ -561,7 +588,7 @@ impl CodeGenerator<'_> {
             value_tag,
             field.descriptor.number()
         ));
-        self.append_field_attributes(fq_message_name, field.descriptor.name());
+        self.append_field_attributes(self.package.clone(), fq_message_name, descriptor, field.descriptor.name().to_string(), FieldDescriptor::MapField(key_tag.to_string(), value_tag.to_string(), field.descriptor.clone()));
         self.push_indent();
         self.buf.push_str(&format!(
             "pub {}: {}<{}, {}>,\n",
@@ -576,6 +603,7 @@ impl CodeGenerator<'_> {
         &mut self,
         message_name: &str,
         fq_message_name: &str,
+        descriptor: Descriptor,
         oneof: &OneofField,
     ) {
         let type_name = format!(
@@ -594,7 +622,7 @@ impl CodeGenerator<'_> {
                 .map(|field| field.descriptor.number())
                 .join(", "),
         ));
-        self.append_field_attributes(fq_message_name, oneof.descriptor.name());
+        self.append_field_attributes(self.package.clone(), fq_message_name, descriptor, oneof.descriptor.name().to_string(), FieldDescriptor::Oneof(oneof.descriptor.clone()));
         self.push_indent();
         self.buf.push_str(&format!(
             "pub {}: ::core::option::Option<{}>,\n",
@@ -603,7 +631,8 @@ impl CodeGenerator<'_> {
         ));
     }
 
-    fn append_oneof(&mut self, fq_message_name: &str, oneof: &OneofField) {
+    fn append_oneof(&mut self, fq_message_name: &str, descriptor_proto: DescriptorProto, oneof: &OneofField) {
+        let descriptor = Descriptor::Oneof(descriptor_proto, oneof.descriptor.clone());
         self.path.push(8);
         self.path.push(oneof.path_index);
         self.append_doc(fq_message_name, None);
@@ -611,8 +640,8 @@ impl CodeGenerator<'_> {
         self.path.pop();
 
         let oneof_name = format!("{}.{}", fq_message_name, oneof.descriptor.name());
-        self.append_type_attributes(&oneof_name);
-        self.append_enum_attributes(&oneof_name);
+        self.append_type_attributes(self.package.clone(), &oneof_name, descriptor.clone());
+        self.append_enum_attributes(self.package.clone(), &oneof_name, descriptor.clone());
         self.push_indent();
 
         let can_oneof_derive_copy = oneof.fields.iter().all(|field| {
@@ -644,7 +673,7 @@ impl CodeGenerator<'_> {
                 ty_tag,
                 field.descriptor.number()
             ));
-            self.append_field_attributes(&oneof_name, field.descriptor.name());
+            self.append_field_attributes(self.package.to_string(), &oneof_name, descriptor.clone(), field.descriptor.name().to_string(), FieldDescriptor::Field(ty_tag.to_string(), field.descriptor.clone()));
 
             self.push_indent();
             let ty = self.resolve_type(&field.descriptor, fq_message_name);
@@ -716,6 +745,7 @@ impl CodeGenerator<'_> {
 
         let enum_values = &desc.value;
         let fq_proto_enum_name = self.fq_name(proto_enum_name);
+        let descriptor = Descriptor::Enum(desc.clone());
 
         if self
             .extern_paths
@@ -726,8 +756,8 @@ impl CodeGenerator<'_> {
         }
 
         self.append_doc(&fq_proto_enum_name, None);
-        self.append_type_attributes(&fq_proto_enum_name);
-        self.append_enum_attributes(&fq_proto_enum_name);
+        self.append_type_attributes(self.package.to_string(), &fq_proto_enum_name, descriptor.clone());
+        self.append_enum_attributes(self.package.to_string(), &fq_proto_enum_name, descriptor.clone());
         self.push_indent();
         let dbg = if self.should_skip_debug(&fq_proto_enum_name) {
             ""
@@ -755,7 +785,7 @@ impl CodeGenerator<'_> {
             self.path.push(variant.path_idx as i32);
 
             self.append_doc(&fq_proto_enum_name, Some(variant.proto_name));
-            self.append_field_attributes(&fq_proto_enum_name, variant.proto_name);
+            self.append_field_attributes(self.package.to_string(), &fq_proto_enum_name, descriptor.clone(), variant.proto_name.to_string(), FieldDescriptor::EnumVariant);
             self.push_indent();
             self.buf.push_str(&variant.generated_variant_name);
             self.buf.push_str(" = ");
