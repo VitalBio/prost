@@ -539,6 +539,8 @@ pub struct FileOptions {
     /// determining the ruby package.
     #[prost(string, optional, tag = "45")]
     pub ruby_package: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(bool, optional, tag = "46", default = "true")]
+    pub require_all: ::core::option::Option<bool>,
     /// The parser stores options it doesn't recognize here.
     /// See the documentation for the "Options" section above.
     #[prost(message, repeated, tag = "999")]

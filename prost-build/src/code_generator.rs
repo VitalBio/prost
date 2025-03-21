@@ -37,6 +37,7 @@ pub struct CodeGenerator<'a> {
     depth: u8,
     path: Vec<i32>,
     buf: &'a mut String,
+    require_all: bool,
 }
 
 fn push_indent(buf: &mut String, depth: u8) {
@@ -115,6 +116,7 @@ impl CodeGenerator<'_> {
             depth: 0,
             path: Vec::new(),
             buf,
+            require_all: file.options.map(|opt| opt.require_all).flatten().unwrap_or(true)
         };
 
         debug!(
@@ -1053,7 +1055,7 @@ impl CodeGenerator<'_> {
         }
 
         match field.r#type() {
-            Type::Message => true,
+            Type::Message => self.require_all,
             _ => self.syntax == Syntax::Proto2,
         }
     }
